@@ -5,3 +5,11 @@ __pycache__/
 *.pyo
 *.pyd
 .Python
+.env
+/*/.env
+
+carddetection/.env
+carddetection/cards/*
+carddetection/images/*
+elixircount/frame/*
+elixircount/images/*
