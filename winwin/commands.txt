@@ -1,0 +1,27 @@
+# startup
+python -m venv venv
+venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python winwin.py
+
+
+docker
+
+docker build -t winwiner:latest .
+# if publisher is running in different docker network. use this
+docker run --name winwiner -p 5550:5550 -p 5551:5551 -e ZMQ_ADDRESS="tcp://localhost:5550" -d winwiner:latest
+
+# if still facing issue try using host networking
+docker run --network=host --name winwiner -p 5550:5550 -p 5551:5551 -e ZMQ_ADDRESS="tcp://localhost:5550" -d winwiner:latest
+
+
+
+# if publisher is running in same docker network
+docker run --name winwiner --network cr_network -d winwiner:latest
+
+
+# to remove or stop the container
+docker stop winwiner
+docker rm winwiner
+docker rmi winwiner:latest
+
