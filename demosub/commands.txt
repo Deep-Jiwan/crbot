@@ -1,0 +1,26 @@
+venv\Scripts\Activate.ps1
+python abx.py
+
+
+docker
+
+docker build -t elixir_counter:latest .
+# if publisher is running in different docker network. use this
+docker run --name elixir_counter -p 5550:5550 -p 5551:5551 -e ZMQ_ADDRESS="tcp://localhost:5550" -d elixir_counter:latest
+
+
+docker run --network=host --name elixir_counter -p 5550:5550 -p 5551:5551 -e ZMQ_ADDRESS="tcp://localhost:5550" -d elixir_counter:latest
+
+
+
+# if publisher is running in same docker network
+docker run --name elixir_counter --network cr_network -d elixir_counter:latest
+
+
+docker stop elixir_counter
+
+
+
+docker rm elixir_counter
+docker rmi elixir_counter:latest
+
