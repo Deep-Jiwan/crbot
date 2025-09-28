@@ -11,8 +11,11 @@ docker build -t winwiner:latest .
 # if publisher is running in different docker network. use this
 docker run --name winwiner -p 5550:5550 -p 5551:5551 -e ZMQ_ADDRESS="tcp://localhost:5550" -d winwiner:latest
 
-# if still facing issue try using host networking
+# if still facing issue try using host networking, ports dont matter
 docker run --network=host --name winwiner -p 5550:5550 -p 5551:5551 -e ZMQ_ADDRESS="tcp://localhost:5550" -d winwiner:latest
+
+# with env file, in host ports dont matter
+docker run --network=host --name winwiner -p 5550:5550 -p 5551:5551 --env-file .env -d winwiner:latest
 
 
 
