@@ -1,26 +1,27 @@
+# startup
+python -m venv venv
 venv\Scripts\Activate.ps1
+pip install -r requirements.txt
 python abx.py
 
 
-docker
+# docker (adjust as needed for ports etc)
 
-docker build -t elixir_counter:latest .
+docker build -t <container-name>:latest .
 # if publisher is running in different docker network. use this
-docker run --name elixir_counter -p 5550:5550 -p 5551:5551 -e ZMQ_ADDRESS="tcp://localhost:5550" -d elixir_counter:latest
+docker run --name <container-name> -p 5550:5550 -p 5551:5551 -e ZMQ_ADDRESS="tcp://localhost:5550" -d <container-name>:latest
 
-
-docker run --network=host --name elixir_counter -p 5550:5550 -p 5551:5551 -e ZMQ_ADDRESS="tcp://localhost:5550" -d elixir_counter:latest
+# if still facing issue try using host networking
+docker run --network=host --name <container-name> -p 5550:5550 -p 5551:5551 -e ZMQ_ADDRESS="tcp://localhost:5550" -d <container-name>:latest
 
 
 
 # if publisher is running in same docker network
-docker run --name elixir_counter --network cr_network -d elixir_counter:latest
+docker run --name <container-name> --network cr_network -d <container-name>:latest
 
 
-docker stop elixir_counter
-
-
-
-docker rm elixir_counter
-docker rmi elixir_counter:latest
+# to remove or stop the container
+docker stop <container-name>
+docker rm <container-name>
+docker rmi <container-name>:latest
 
