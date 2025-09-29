@@ -7,7 +7,8 @@ __pycache__/
 .Python
 .env
 /*/.env
-.env.test
+.env.*
+*.env
 
 carddetection/.env
 carddetection/cards/*
