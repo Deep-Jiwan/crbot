@@ -1,17 +1,25 @@
 import os
 import cv2
-import zmq
-from roboflow import Roboflow
-from dotenv import load_dotenv
+import threading
 import time
+import zmq
+import numpy as np
+from inference_sdk import InferenceHTTPClient
+from dotenv import load_dotenv
 
-# -------------------------
-# Load environment variables
-# -------------------------
+# Load environment variables from .env file
 load_dotenv()
 
-FRAME_WIDTH = int(os.getenv("FRAME_WIDTH", 1080))
-FRAME_HEIGHT = int(os.getenv("FRAME_HEIGHT", 1920))
+# -----------------------------
+# Configuration
+# -----------------------------
+FRAME_WIDTH = 1080
+FRAME_HEIGHT = 1920
+
+IMAGE_FOLDER = "images"
+CARDS_FOLDER = "cards"
+
+# Card slots (x1, y1, x2, y2)
 CARD_SLOTS = {
     "slot1": (225, 1560, 415, 1785),
     "slot2": (415, 1560, 605, 1785),
@@ -19,96 +27,218 @@ CARD_SLOTS = {
     "slot4": (795, 1560, 985, 1785),
 }
 
-IMAGE_FOLDER = os.getenv("IMAGE_FOLDER", "images")
-CARDS_FOLDER = os.path.join(os.path.dirname(__file__), "cards")
+# Inference API configuration
+ROBOFLOW_URL = os.getenv("ROBOFLOW_URL")
+ROBOFLOW_API_KEY = os.getenv("ROBOFLOW_API_KEY")
+WORKSPACE_NAME = os.getenv("WORKSPACE_NAME")
+WORKFLOW_ID = os.getenv("WORKFLOW_ID")
+
+# ZeroMQ configuration
+ZMQ_ADDRESS = os.getenv("ZMQ_ADDRESS", "tcp://localhost:5550")
+PUB_PORT = os.getenv("PUB_PORT", "5554")
+
+# Validate required environment variables
+if not ROBOFLOW_API_KEY:
+    raise ValueError("ROBOFLOW_API_KEY environment variable is required")
+if not WORKSPACE_NAME:
+    raise ValueError("WORKSPACE_NAME environment variable is required")
+if not WORKFLOW_ID:
+    raise ValueError("WORKFLOW_ID environment variable is required")
+
+# Shared state for latest detected cards
+latest_cards = []
+cards_lock = threading.Lock()
+
+# Ensure folders exist
 os.makedirs(IMAGE_FOLDER, exist_ok=True)
 os.makedirs(CARDS_FOLDER, exist_ok=True)
 
-ZMQ_ADDRESS = os.getenv("ZMQ_ADDRESS", "tcp://localhost:5550")  # frames come in here
-PUB_ADDRESS = os.getenv("ZMQ_PUB_ADDRESS", "tcp://*:5552")      # predictions go out here
-SLEEP_TIME = float(os.getenv("SLEEP_TIME", 0.1))
 
-ROBOFLOW_API_KEY = os.getenv("ROBOFLOW_API_KEY")
-ROBOFLOW_WORKFLOW_ID = os.getenv("ROBOFLOW_WORKFLOW_ID")
+# ----------------------------
+# ZeroMQ Frame Receiver
+# ----------------------------
+class FrameReceiver:
+    def __init__(self):
+        self.context = zmq.Context()
+        self.sub_socket = self.context.socket(zmq.SUB)
+        self.sub_socket.connect(ZMQ_ADDRESS)
+        self.sub_socket.setsockopt(zmq.SUBSCRIBE, b"frame|")
+        # Set socket to non-blocking to get latest frame
+        self.sub_socket.setsockopt(zmq.RCVTIMEO, 100)  # 100ms timeout
+    
+    def get_latest_frame(self):
+        """Gets the latest frame from ZeroMQ and saves it."""
+        try:
+            # Get all available messages to ensure we have the latest
+            latest_msg = None
+            while True:
+                try:
+                    msg = self.sub_socket.recv(zmq.NOBLOCK)
+                    latest_msg = msg
+                except zmq.Again:
+                    break
+            
+            if latest_msg is None:
+                return False
+                
+            topic, jpg_bytes = latest_msg.split(b"|", 1)
+            
+            img = cv2.imdecode(np.frombuffer(jpg_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+            if img is None:
+                print("Failed to decode frame")
+                return False
+            
+            img_resized = cv2.resize(img, (FRAME_WIDTH, FRAME_HEIGHT))
+            
+            save_path = os.path.join(IMAGE_FOLDER, "latest_frame.jpg")
+            cv2.imwrite(save_path, img_resized)
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error receiving frame: {e}")
+            return False
+    
+    def close(self):
+        """Clean up ZeroMQ resources."""
+        self.sub_socket.close()
+        self.context.term()
 
-# -------------------------
-# ZeroMQ Setup
-# -------------------------
-context = zmq.Context()
+# Global frame receiver instance
+frame_receiver = FrameReceiver()
 
-# Subscriber for frames
-sub_socket = context.socket(zmq.SUB)
-sub_socket.connect(ZMQ_ADDRESS)
-sub_socket.setsockopt(zmq.SUBSCRIBE, b"frame|")
+# ----------------------------
+# ZeroMQ Publisher
+# ----------------------------
+def setup_publisher():
+    """Setup ZeroMQ publisher for card results."""
+    context = zmq.Context()
+    pub_socket = context.socket(zmq.PUB)
+    pub_socket.bind(f"tcp://*:{PUB_PORT}")
+    return pub_socket
 
-# Publisher for card predictions
-pub_socket = context.socket(zmq.PUB)
-pub_socket.bind(PUB_ADDRESS)
+def publish_cards(pub_socket, cards):
+    """Publish card detection results."""
+    # Convert cards list to string format
+    cards_str = ",".join([f"{idx}:{name}" for idx, name in cards])
+    message = f"cards|{cards_str}".encode()
+    pub_socket.send(message)
+    print(f"Published: {message}")
 
-print(f"Card Detection Subscriber listening on {ZMQ_ADDRESS}")
-print(f"Publishing predictions on {PUB_ADDRESS}")
+# Global publisher socket
+pub_socket = setup_publisher()
 
-# -------------------------
-# Roboflow Setup
-# -------------------------
-rf = Roboflow(api_key=ROBOFLOW_API_KEY)
-project = rf.workspace().project(ROBOFLOW_WORKFLOW_ID)  # use workflow ID
-print("Connected to Roboflow workflow:", ROBOFLOW_WORKFLOW_ID)
+# -----------------------------
+# Card Extraction
+# -----------------------------
+def extract_cards_from_frame(frame_path: str):
+    """Crops cards from a frame and saves them in CARDS_FOLDER."""
+    frame = cv2.imread(frame_path)
+    if frame is None:
+        raise ValueError(f"Could not read frame: {frame_path}")
 
-# -------------------------
-# Functions
-# -------------------------
-def extract_cards(frame):
-    """Crop the 4 card slots and save to disk"""
-    slots = {}
+    h, w, _ = frame.shape
+    if h != FRAME_HEIGHT or w != FRAME_WIDTH:
+        print(f"⚠️ Warning: Frame is {w}x{h}, expected {FRAME_WIDTH}x{FRAME_HEIGHT}")
+
     for slot_name, (x1, y1, x2, y2) in CARD_SLOTS.items():
         crop = frame[y1:y2, x1:x2]
         save_path = os.path.join(CARDS_FOLDER, f"{slot_name}.png")
         cv2.imwrite(save_path, crop)
-        slots[slot_name] = save_path
-    return slots
 
-def detect_cards(frame_path):
-    """Send cropped cards to Roboflow for prediction"""
-    slots = extract_cards(cv2.imread(frame_path))
-    results = {}
-    for slot_name, img_path in slots.items():
+# -----------------------------
+# Card Detection
+# -----------------------------
+class CardDetector:
+    def __init__(self, cards_folder, roboflow_url, roboflow_api_key, workspace_name, workflow_id):
+        self.client = InferenceHTTPClient(
+            api_url=roboflow_url,
+            api_key=roboflow_api_key,
+        )
+        self.workspace_name = workspace_name
+        self.workflow_id = workflow_id
+        self.cards_folder = cards_folder
+        self.latest_results = []
+
+    def detect_cards(self, latest_cards, cards_lock):
+        """Detects all card images in the folder."""
+        card_files = sorted([
+            f for f in os.listdir(self.cards_folder)
+            if os.path.isfile(os.path.join(self.cards_folder, f))
+               and f.lower().endswith((".png", ".jpg", ".jpeg"))
+        ])
+
+        detected_cards = []
+        for idx, filename in enumerate(card_files, start=1):
+            path = os.path.join(self.cards_folder, filename)
+            try:
+                results = self.client.run_workflow(
+                    workspace_name=self.workspace_name,
+                    workflow_id=self.workflow_id,
+                    images={"image": path},
+                )
+
+                predictions = []
+                if isinstance(results, list) and results:
+                    preds_dict = results[0].get("predictions", {})
+                    if isinstance(preds_dict, dict):
+                        predictions = preds_dict.get("predictions", [])
+
+                if predictions:
+                    card_name = predictions[0].get("class", "Unknown")
+                else:
+                    card_name = "Unknown"
+
+                detected_cards.append((idx, card_name))
+            except Exception as e:
+                print(f"Error detecting card at index {idx}: {e}")
+                detected_cards.append((idx, "Unknown"))
+
+        # Update global shared state
+        with cards_lock:
+            latest_cards.clear()
+            latest_cards.extend(detected_cards)
+
+# -----------------------------
+# Card Extraction Thread
+# -----------------------------
+def start_card_extraction():
+    """Continuously receive frames and detect cards."""
+    detector = CardDetector(CARDS_FOLDER, ROBOFLOW_URL, ROBOFLOW_API_KEY, WORKSPACE_NAME, WORKFLOW_ID)
+    frame_path = os.path.join(IMAGE_FOLDER, "latest_frame.jpg")
+    
+    while True:
         try:
-            prediction = project.predict(img_path)
-            results[slot_name] = prediction.json()  # returns dict of prediction data
+            # Get latest frame from ZeroMQ
+            if frame_receiver.get_latest_frame():
+                # Extract cards from the updated frame
+                extract_cards_from_frame(frame_path)
+                detector.detect_cards(latest_cards, cards_lock)
+                with cards_lock:
+                    print(f"Latest detected cards: {latest_cards}")
+                    # Publish card results
+                    publish_cards(pub_socket, latest_cards)
         except Exception as e:
-            results[slot_name] = {"error": str(e)}
-    return results
+            print(f"Error extracting/detecting cards: {e}")
 
-def publish_results(results):
-    pub_socket.send_json({"type": "cards", "data": results})
-    print("Published card predictions:", results)
+        time.sleep(0.1)  # Check for new frames more frequently
 
-# -------------------------
-# Main Loop
-# -------------------------
-frame_file = os.path.join(IMAGE_FOLDER, "latest_frame.png")
-
-while True:
+# -----------------------------
+# Main Execution
+# -----------------------------
+if __name__ == "__main__":
     try:
-        msg = sub_socket.recv()
-        topic, jpg_bytes = msg.split(b"|", 1)
+        # Start extraction in a separate daemon thread
+        threading.Thread(
+            target=start_card_extraction,
+            daemon=True
+        ).start()
 
-        img = cv2.imdecode(np.frombuffer(jpg_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
-        if img is None:
-            print("Failed to decode frame")
-            continue
+        print("Card extraction thread started. Monitoring ZeroMQ frames...")
 
-        # Resize to match expected frame size
-        img_resized = cv2.resize(img, (FRAME_WIDTH, FRAME_HEIGHT))
-        cv2.imwrite(frame_file, img_resized)
-
-        # Run card detection
-        results = detect_cards(frame_file)
-        publish_results(results)
-
-        time.sleep(SLEEP_TIME)
-
+        # Keep main thread alive
+        while True:
+            time.sleep(1)
     except KeyboardInterrupt:
-        print("Exiting card detection...")
-        break
+        print("Shutting down...")
+        frame_receiver.close()
