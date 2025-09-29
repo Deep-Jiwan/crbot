@@ -56,7 +56,7 @@ This repository provides a modular pipeline for a Clash Royale helper bot built 
 
 * Windows 10/11
 * Python 3.11+
-* Webcam (or other frame source)
+* Bluestacks (or other frame source)
 * Optional: Docker, Roboflow account
 
 ### Installation
