@@ -225,6 +225,7 @@ Open an issue for questions and support.
 
 * ZeroMQ community and examples
 * Roboflow documentation and tooling
+* https://github.com/krazyness/CRBot-public?tab=readme-ov-file
 * Best README Template inspiration
 
 
@@ -236,3 +237,4 @@ Open an issue for questions and support.
 [Roboflow-url]: https://www.roboflow.com/
 [Python.org]: https://img.shields.io/badge/Python-white?style=for-the-badge&logo=python&link=https%3A%2F%2Fwww.python.org%2F
 [Python-url]: https://www.python.org/
+

@@ -23,3 +23,4 @@ COPY . .
 
 # Run the application
 CMD ["python", "card_detection.py"]
+

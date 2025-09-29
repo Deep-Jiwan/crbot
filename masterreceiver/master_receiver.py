@@ -6,14 +6,14 @@ from pathlib import Path
 
 # Load environment variables from masterreceiver.env
 script_dir = Path(__file__).parent.absolute()
-env_path = script_dir / "masterreceiver.env"
+env_path = script_dir / ".env"
 load_dotenv(env_path)
 
 # Configuration from environment
-TROOPS_PORT = os.getenv("TROOPS_PORT", "5555")
-ELIXIR_PORT = os.getenv("ELIXIR_PORT", "5551")
+TROOPS_PORT = os.getenv("TROOPS_PORT", "5580")
+ELIXIR_PORT = os.getenv("ELIXIR_PORT", "5560")
 WIN_PORT = os.getenv("WIN_PORT", "5570")
-CARDS_PORT = os.getenv("CARDS_PORT", "5554")  # Added card detection port
+CARDS_PORT = os.getenv("CARDS_PORT", "5590")  # Added card detection port
 
 # Create ZeroMQ context
 context = zmq.Context()

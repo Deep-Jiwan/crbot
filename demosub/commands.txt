@@ -29,8 +29,6 @@ docker run --name <image> --network cr_network -d <image>:latest
 docker run --network=host --env-file .env -d <image>:latest
 
 
-
-
 Container Management
 --------------------
 docker stop <image>
