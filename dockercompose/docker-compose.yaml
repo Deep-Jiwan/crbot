@@ -49,3 +49,18 @@ services:
     ports:
       - "5560:5560"
     restart: unless-stopped
+
+  carddetection:
+    image: ghcr.io/deep-jiwan/crbot/carddetection:latest
+    container_name: carddetection
+    env_file:
+      - .env.carddetection
+    environment:
+      - ZMQ_ADDRESS=tcp://gateway:5550
+    networks:
+      - cr_network
+    depends_on:
+      - gateway
+    ports:
+      - "5590:5590"
+    restart: unless-stopped

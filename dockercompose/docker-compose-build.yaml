@@ -1,19 +1,19 @@
 networks:
-  cr_network:
+  cr_network_build:
     driver: bridge
     internal: false
 
 services:
   gateway:
     image: alpine/socat
-    container_name: gateway
+    container_name: gateway-build
     volumes:
       - ./gateway-entrypoint.sh:/entrypoint.sh:ro
     entrypoint: ["/bin/sh", "/entrypoint.sh"]
     ports:
       - "5550:5550"
     networks:
-      - cr_network
+      - cr_network_build
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
@@ -23,13 +23,13 @@ services:
       context: ../winwin
       dockerfile: Dockerfile
     image: ghcr.io/deep-jiwan/crbot/wincheck:build
-    container_name: windetection
+    container_name: windetection-build
     env_file:
       - .env.windetection
     environment:
       - ZMQ_ADDRESS=tcp://gateway:5550
     networks:
-      - cr_network
+      - cr_network_build
     depends_on:
       - gateway
     ports:
@@ -41,15 +41,33 @@ services:
       context: ../elixircount
       dockerfile: Dockerfile
     image: ghcr.io/deep-jiwan/crbot/elixircounter:build
-    container_name: elixircounter
+    container_name: elixircounter-build
     env_file:
       - .env.elixircounter
     environment:
       - ZMQ_ADDRESS=tcp://gateway:5550
     networks:
-      - cr_network
+      - cr_network_build
     depends_on:
       - gateway
     ports:
       - "5560:5560"
+    restart: unless-stopped
+
+  carddetection:
+    build:
+      context: ../carddetection
+      dockerfile: Dockerfile
+    image: ghcr.io/deep-jiwan/crbot/carddetection:build
+    container_name: carddetection-build
+    env_file:
+      - .env.carddetection
+    environment:
+      - ZMQ_ADDRESS=tcp://gateway:5550
+    networks:
+      - cr_network_build
+    depends_on:
+      - gateway
+    ports:
+      - "5590:5590"
     restart: unless-stopped

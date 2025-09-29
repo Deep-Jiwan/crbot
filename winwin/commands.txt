@@ -1,30 +1,35 @@
-# startup
+Winwiner - Setup & Docker Guide
+--------------------------------
+
+Local Startup
+-------------
 python -m venv venv
 venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+
 python winwin.py
 
 
-docker
+Docker
+------
 
+# Build image:
 docker build -t winwiner:latest .
-# if publisher is running in different docker network. use this
-docker run --name winwiner -p 5550:5550 -p 5551:5551 -e ZMQ_ADDRESS="tcp://localhost:5550" -d winwiner:latest
 
-# if still facing issue try using host networking, ports dont matter
-docker run --network=host --name winwiner -p 5550:5550 -p 5551:5551 -e ZMQ_ADDRESS="tcp://localhost:5550" -d winwiner:latest
+# Run container:
 
-# with env file, in host ports dont matter
-docker run --network=host --name winwiner --env-file .env -d winwiner:latest
-
-
-
-# if publisher is running in same docker network
+# Publisher in same docker network
 docker run --name winwiner --network cr_network -d winwiner:latest
 
+# Use host networking (if network issues persist, ports don’t matter)
+docker run --network=host -e ZMQ_ADDRESS="tcp://localhost:5550" -d winwiner:latest
 
-# to remove or stop the container
+# Use env file with host networking (ports don’t matter)
+docker run --network=host --env-file .env -d winwiner:latest
+
+
+Container Management
+--------------------
 docker stop winwiner
 docker rm winwiner
 docker rmi winwiner:latest
-

@@ -1,27 +1,35 @@
-# startup
+Elixir Counter - Setup & Docker Guide
+-------------------------------------
+
+Local Startup
+-------------
 python -m venv venv
 venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+
 python elixir_count.py
 
+# Test with:
+python test.py
 
-docker
 
+Docker
+------
+
+# Build image:
 docker build -t elixir_counter:latest .
-# if publisher is running in different docker network. use this
-docker run --name elixir_counter -p 5550:5550 -p 5551:5551 -e ZMQ_ADDRESS="tcp://localhost:5550" -d elixir_counter:latest
 
-# if still facing issue try using host networking
-docker run --network=host --name elixir_counter -p 5550:5550 -p 5551:5551 -e ZMQ_ADDRESS="tcp://localhost:5550" -d elixir_counter:latest
+# Run container:
 
-
-
-# if publisher is running in same docker network
+# Publisher in same docker network
 docker run --name elixir_counter --network cr_network -d elixir_counter:latest
 
+# Use host networking (if network issues persist)
+docker run --network=host --env-file .env -d elixir_counter:latest
 
-# to remove or stop the container
+
+Container Management
+--------------------
 docker stop elixir_counter
 docker rm elixir_counter
 docker rmi elixir_counter:latest
-

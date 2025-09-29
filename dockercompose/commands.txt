@@ -1,15 +1,20 @@
-# start compose with building from local
-docker-compose -p crbot -f docker-compose-build.yaml up -d --build
+Docker Compose Guide
+--------------------
 
-# start compose with using images from github
+# Start compose with build from local
+docker-compose -p crbot-build -f docker-compose-build.yaml up -d --build
+
+# Start compose using images from GitHub
 docker-compose -p crbot -f docker-compose.yaml up -d
 
-# stop existing compose. dont delete data
+# Stop existing compose (data not deleted)
 docker-compose -p crbot -f docker-compose.yaml stop
+docker-compose -p crbot-build -f docker-compose-build.yaml stop
 
-# start existing compose. dont build.
+# Start existing compose (no rebuild)
 docker-compose -p crbot -f docker-compose.yaml up -d
+docker-compose -p crbot-build -f docker-compose-build.yaml up -d
 
-# remove compose. delete data
+# Remove compose and delete data
 docker-compose -p crbot -f docker-compose.yaml down --volumes
-
+docker-compose -p crbot-build -f docker-compose-build.yaml down --volumes
