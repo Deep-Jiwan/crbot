@@ -64,3 +64,18 @@ services:
     ports:
       - "5590:5590"
     restart: unless-stopped
+
+  troopdetection:
+    image: ghcr.io/deep-jiwan/crbot/troopdetection:latest
+    container_name: troopdetection
+    env_file:
+      - .env.troopdetection
+    environment:
+      - ZMQ_ADDRESS=tcp://gateway:5550
+    networks:
+      - cr_network
+    depends_on:
+      - gateway
+    ports:
+      - "5580:5580"
+    restart: unless-stopped

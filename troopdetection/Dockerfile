@@ -22,5 +22,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Run the application
-CMD ["python", "card_detection.py"]
+CMD ["python", "troop_detection.py"]
 

@@ -71,3 +71,22 @@ services:
     ports:
       - "5590:5590"
     restart: unless-stopped
+
+
+  troopdetection:
+    build:
+      context: ../troopdetection
+      dockerfile: Dockerfile
+    image: ghcr.io/deep-jiwan/crbot/troopdetection:build
+    container_name: troopdetection-build
+    env_file:
+      - .env.troopdetection
+    environment:
+      - ZMQ_ADDRESS=tcp://gateway:5550
+    networks:
+      - cr_network_build
+    depends_on:
+      - gateway
+    ports:
+      - "5580:5580"
+    restart: unless-stopped
