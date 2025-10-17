@@ -38,6 +38,34 @@ def map_json_to_grid(data, canvas_width=1080, canvas_height=1920, rows=32, cols=
     return data
 
 
+def map_grid_to_pixel(col, row, canvas_width=1080, canvas_height=1920, rows=32, cols=18):
+    """
+    Convert grid coordinates (col, row) where col in [0, cols-1], row in [0, rows-1]
+    to pixel coordinates (x, y) in the canvas coordinate space.
+    """
+    # Validate inputs
+    if not (0 <= col < cols) or not (0 <= row < rows):
+        raise ValueError(f"Grid coordinates out of range: col={col}, row={row}")
+
+    # Calibrated affine transform (selected and frozen):
+    # px = a*col + b*row + c
+    # py = d*col + e*row + f
+    a = 61.847454
+    b = -1.203915
+    c = 30.395021
+    d = -1.582325
+    e = 49.169769
+    f = 45.042014
+
+    px = a * col + b * row + c
+    py = d * col + e * row + f
+
+    # Clip to valid pixel bounds
+    px = max(0.0, min(px, canvas_width - 1))
+    py = max(0.0, min(py, canvas_height - 1))
+
+    return px, py
+
 if __name__ == '__main__':
     import sys
     if len(sys.argv) != 2:
@@ -67,3 +95,4 @@ if __name__ == '__main__':
     except FileNotFoundError:
         print(f"File not found: {jsonl_path}")
         sys.exit(1)
+
