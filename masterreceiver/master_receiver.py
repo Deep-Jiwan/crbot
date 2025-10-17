@@ -50,7 +50,7 @@ poller.register(sub_socket_cards, zmq.POLLIN)  # Added card socket
 # Current state for logging
 current_state = {
     "elixir": 0,
-    "win_detection": False,
+    "win_detection": "ongoing",  # Can be: "ongoing", True, or False
     "cards_in_hand": [],
     "troops": []
 }
@@ -108,11 +108,26 @@ def process_elixir(msg):
     log_state(current_state)
 
 def process_win(msg):
-    """Process win/lose message"""
+    """Process win/lose/ongoing message"""
     global current_state
     topic, result_data = msg.split(b"|", 1)
-    current_state["win_detection"] = result_data.decode() == "True"
-    print(f"\n{'🏆 WIN' if current_state['win_detection'] else '💀 LOSE'} - {'Victory' if current_state['win_detection'] else 'Defeat'} detected!")
+    result_str = result_data.decode()
+    
+    # Handle three states: "True", "False", or "ongoing"
+    if result_str == "True":
+        current_state["win_detection"] = True
+        print(f"\n🏆 WIN - Victory detected!")
+    elif result_str == "False":
+        current_state["win_detection"] = False
+        print(f"\n💀 LOSE - Defeat detected!")
+    elif result_str == "ongoing":
+        current_state["win_detection"] = "ongoing"
+        print(f"\n⚔️ ONGOING - Match in progress")
+    else:
+        # Unexpected value, keep as ongoing
+        current_state["win_detection"] = "ongoing"
+        print(f"\n⚠️ Unknown win detection status: {result_str}")
+    
     log_state(current_state)
 
 def process_cards(msg):

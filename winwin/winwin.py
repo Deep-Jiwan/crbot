@@ -147,8 +147,20 @@ def process_frame(img):
     
     return result
 
-def publish_result(is_win):
-    result_str = "True" if is_win else "False"
+def publish_result(result):
+    """
+    Publish win/lose/ongoing result.
+    - result = True: WIN
+    - result = False: LOSE
+    - result = None: ONGOING
+    """
+    if result is True:
+        result_str = "True"
+    elif result is False:
+        result_str = "False"
+    else:  # None or anything else
+        result_str = "ongoing"
+    
     message = f"winner|{result_str}".encode()
     pub_socket.send(message)
     print(f"Published: {message}")
@@ -169,7 +181,7 @@ while True:
     # print(f"Saved frame to {frame_filename}")
 
     result = process_frame(img_resized)
-    if result is not None:  # Only publish if we have a clear result
-        publish_result(result)
+    # Always publish result: True (win), False (lose), or None (ongoing)
+    publish_result(result)
 
     time.sleep(SLEEP_TIME)

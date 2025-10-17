@@ -17,43 +17,56 @@
 
         <div class="inference-section">
             <h2>Inference</h2>
-            <div class="input-group">
-                <label for="gameState">Paste a game state here:</label>
-                <div class="input-row">
-                    <textarea id="gameState" placeholder="Enter game state data..."></textarea>
-                    <button onclick="visualizeGameState()">Visualize</button>
+            
+            <!-- Game Status Display -->
+            <div style="margin-bottom: 20px; padding: 15px; background: #1a1a1a; border: 2px solid #444; border-radius: 8px;">
+                <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                    <div style="flex: 1; min-width: 150px;">
+                        <label style="font-size: 12px; color: #aaa; display: block; margin-bottom: 5px;">Match Status:</label>
+                        <div id="matchStatus" style="font-size: 16px; font-weight: 600; color: #ffffff;">Waiting...</div>
+                    </div>
+                    <div style="flex: 1; min-width: 150px;">
+                        <label style="font-size: 12px; color: #aaa; display: block; margin-bottom: 5px;">Elixir Count:</label>
+                        <div id="elixirCount" style="font-size: 20px; font-weight: 700; color: #9b59b6;">-</div>
+                    </div>
                 </div>
-            </div>
-            <div class="info-text">
-                <strong>Grid Dimensions:</strong> 18 columns × 32 rows (Portrait)<br>
-                <strong>Usage:</strong> Use the paintCell(x, y, color) function to paint individual cells.
             </div>
             
-            <div class="input-group" style="margin-top: 30px;">
-                <label>Manual Paint:</label>
-                <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end;">
-                    <div style="flex: 0 0 80px;">
-                        <label style="font-size: 12px; margin-bottom: 5px;">X (0-17):</label>
-                        <input type="number" id="paintX" min="0" max="17" value="0" 
-                               style="width: 100%; background: #1a1a1a; color: #fff; border: 2px solid #444; 
-                                      border-radius: 4px; padding: 8px; font-size: 14px;">
-                    </div>
-                    <div style="flex: 0 0 80px;">
-                        <label style="font-size: 12px; margin-bottom: 5px;">Y (0-31):</label>
-                        <input type="number" id="paintY" min="0" max="31" value="0" 
-                               style="width: 100%; background: #1a1a1a; color: #fff; border: 2px solid #444; 
-                                      border-radius: 4px; padding: 8px; font-size: 14px;">
-                    </div>
-                    <div style="flex: 0 0 120px;">
-                        <label style="font-size: 12px; margin-bottom: 5px;">Color:</label>
-                        <input type="color" id="paintColor" value="#ff0000" 
-                               style="width: 100%; height: 36px; background: #1a1a1a; border: 2px solid #444; 
-                                      border-radius: 4px; cursor: pointer;">
-                    </div>
-                    <button onclick="manualPaint()" style="height: 36px;">Paint Cell</button>
-                    <button onclick="clearGrid()" style="height: 36px; background: #cc3300;">Clear Grid</button>
-                </div>
+            <!-- Cards in Hand Display -->
+            <div style="margin-bottom: 20px;">
+                <label style="font-size: 14px; font-weight: 600; display: block; margin-bottom: 10px;">Cards in Hand:</label>
+                <div id="cardsList" style="display: flex; gap: 10px; flex-wrap: wrap;"></div>
             </div>
+            
+            <!-- game state input removed per request -->
+            <details class="manual-paint" style="margin-top: 30px;">
+                <summary style="cursor: pointer; font-weight: 600;">Manual Paint (click to expand)</summary>
+                <div class="input-group" style="margin-top: 10px;">
+                    <label>Manual Paint:</label>
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end;">
+                        <div style="flex: 0 0 80px;">
+                            <label style="font-size: 12px; margin-bottom: 5px;">X (0-17):</label>
+                            <input type="number" id="paintX" min="0" max="17" value="0" 
+                                   style="width: 100%; background: #1a1a1a; color: #fff; border: 2px solid #444; 
+                                          border-radius: 4px; padding: 8px; font-size: 14px;">
+                        </div>
+                        <div style="flex: 0 0 80px;">
+                            <label style="font-size: 12px; margin-bottom: 5px;">Y (0-31):</label>
+                            <input type="number" id="paintY" min="0" max="31" value="0" 
+                                   style="width: 100%; background: #1a1a1a; color: #fff; border: 2px solid #444; 
+                                          border-radius: 4px; padding: 8px; font-size: 14px;">
+                        </div>
+                        <div style="flex: 0 0 120px;">
+                            <label style="font-size: 12px; margin-bottom: 5px;">Color:</label>
+                            <input type="color" id="paintColor" value="#ff0000" 
+                                   style="width: 100%; height: 36px; background: #1a1a1a; border: 2px solid #444; 
+                                          border-radius: 4px; cursor: pointer;">
+                        </div>
+                        <button onclick="manualPaint()" style="height: 36px;">Paint Cell</button>
+                        <button onclick="clearGrid()" style="height: 36px; background: #cc3300;">Clear Grid</button>
+                    </div>
+                </div>
+            </details>
         </div>
     </div>
 

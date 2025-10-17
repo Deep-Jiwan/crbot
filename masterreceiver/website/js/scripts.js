@@ -60,65 +60,6 @@ function clearGrid() {
     }
 }
 
-function visualizeGameState() {
-    // Read JSON from textarea, POST to /visualize, and paint returned locations
-    (async () => {
-        const raw = document.getElementById('gameState').value;
-        let payload;
-        try {
-            payload = JSON.parse(raw);
-        } catch (e) {
-            alert('Invalid JSON in game state: ' + e.message);
-            return;
-        }
-
-        try {
-            const resp = await fetch('/visualize', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-
-            if (!resp.ok) {
-                const text = await resp.text();
-                throw new Error(`Server returned ${resp.status}: ${text}`);
-            }
-
-            const data = await resp.json();
-            console.log('Visualize response:', data);
-
-            clearGrid();
-
-            const locations = data.locations || [];
-            if (locations.length === 0) {
-                console.info('No locations returned to visualize.');
-            }
-
-            locations.forEach(loc => {
-                const x = Number(loc.x);
-                const y = Number(loc.y);
-                let color = '#ffff66';
-                const label = (loc.label || '').toLowerCase();
-                if (label.includes('enemy')) color = '#ff6666';
-                else if (label.includes('ally')) color = '#66b3ff';
-                else if (label.includes('princess') || label.includes('tower')) color = '#ffd24d';
-
-                paintCell(x, y, color);
-                // annotate cell with label and coordinates for hover
-                try {
-                    if (cells[y] && cells[y][x]) cells[y][x].title = `${loc.label || ''} : (${x},${y})`;
-                } catch (e) {
-                    // ignore annotation errors
-                }
-            });
-
-        } catch (err) {
-            console.error('Failed to fetch /visualize:', err);
-            alert('Visualization failed: ' + err.message);
-        }
-    })();
-}
-
 // Initialize on DOM ready
 window.addEventListener('DOMContentLoaded', () => {
     initializeGrid();
@@ -130,4 +71,138 @@ window.addEventListener('DOMContentLoaded', () => {
     } catch (e) {
         // ignore if not ready
     }
+    // Start receiving live updates from server via SSE
+    try {
+        startStream();
+    } catch (e) {
+        console.warn('Failed to start EventSource stream:', e);
+    }
 });
+
+
+function startStream() {
+    if (typeof EventSource === 'undefined') {
+        console.warn('This browser does not support EventSource (SSE). Live updates disabled.');
+        return;
+    }
+
+    const es = new EventSource('/stream');
+    es.onmessage = function (evt) {
+        try {
+            const data = JSON.parse(evt.data);
+            
+            // Always update all information continuously, regardless of win state
+            
+            // Update location grid
+            if (data && data.locations) {
+                clearGrid();
+                data.locations.forEach(loc => {
+                    const x = Number(loc.x);
+                    const y = Number(loc.y);
+                    let color = '#ffff66';
+                    const label = (loc.label || '').toLowerCase();
+                    if (label.includes('enemy')) color = '#ff6666';
+                    else if (label.includes('ally')) color = '#66b3ff';
+                    else if (label.includes('princess') || label.includes('tower')) color = '#ffd24d';
+                    paintCell(x, y, color);
+                    try { if (cells[y] && cells[y][x]) cells[y][x].title = `${loc.label || ''} : (${x},${y})`; } catch (e) {}
+                });
+            }
+            
+            // Update cards in hand (handle null/None)
+            if (data && data.cards_in_hand !== undefined && data.cards_in_hand !== null) {
+                renderCards(data.cards_in_hand);
+            } else {
+                renderCards([]);
+            }
+            
+            // Update elixir count (handle null/None)
+            if (data && data.elixir !== undefined && data.elixir !== null) {
+                renderElixir(data.elixir);
+            } else {
+                renderElixir(null);
+            }
+            
+            // Update status (handle null/None)
+            if (data && data.status !== undefined) {
+                renderStatus(data.status, data.win_detection);
+            }
+        } catch (e) {
+            console.error('Failed to parse SSE data:', e, evt.data);
+        }
+    };
+
+    es.onerror = function (err) {
+        console.warn('EventSource error', err);
+    };
+
+    // store the EventSource reference so it can be closed later if needed
+    window._gameStream = es;
+}
+
+
+function renderCards(cards) {
+    const list = document.getElementById('cardsList');
+    if (!list) return;
+    list.innerHTML = '';
+    
+    if (!cards || cards.length === 0) {
+        const el = document.createElement('div');
+        el.style.padding = '6px 8px';
+        el.style.color = '#888';
+        el.style.fontSize = '13px';
+        el.textContent = 'No cards data';
+        list.appendChild(el);
+        return;
+    }
+    
+    cards.forEach(c => {
+        const el = document.createElement('div');
+        el.style.padding = '6px 8px';
+        el.style.background = '#222';
+        el.style.border = '1px solid #444';
+        el.style.borderRadius = '6px';
+        el.style.color = '#fff';
+        el.style.fontSize = '13px';
+        el.textContent = c.name || `slot ${c.slot || '?'}`;
+        list.appendChild(el);
+    });
+}
+
+function renderElixir(elixir) {
+    const el = document.getElementById('elixirCount');
+    if (!el) return;
+    
+    if (elixir === null || elixir === undefined) {
+        el.textContent = '-';
+        el.style.color = '#888';
+    } else {
+        el.textContent = elixir;
+        el.style.color = '#9b59b6';
+    }
+}
+
+function renderStatus(status, win_detection) {
+    const el = document.getElementById('matchStatus');
+    if (!el) return;
+    
+    // Handle null/None values
+    if (status === null || status === undefined) {
+        el.textContent = 'No status data';
+        el.style.color = '#888';
+        return;
+    }
+    
+    // status from server: 'won'|'lost'|'ongoing'
+    // Note: Updates continue flowing regardless of win/loss state
+    if (status === 'won') {
+        el.textContent = 'Won - Match Won';
+        el.style.color = '#2ecc71';
+    } else if (status === 'lost') {
+        el.textContent = 'Lost - Match Lost';
+        el.style.color = '#e74c3c';
+    } else {
+        el.textContent = 'Ongoing - Match in progress';
+        el.style.color = '#ffffff';
+    }
+}
