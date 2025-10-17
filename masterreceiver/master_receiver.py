@@ -87,14 +87,16 @@ def process_troops(msg):
                     })
         current_state["troops"] = troops_list
 
-        # Print for monitoring
-        print("\n" + "="*50)
-        print("🏰 TROOP DETECTION RESULTS")
-        print("="*50)
-        print(f"📊 Total Troops Detected: {len(troops_list)}")
+        # Detailed troop listing
+        print(f"Troops: {len(troops_list)}:")
         for i, troop in enumerate(troops_list, 1):
-            print(f"  {i}. {troop['type']} ({troop['confidence']:.3f}) at ({troop['x']}, {troop['y']}) team: {troop['team']}")
-        
+            ttype = troop.get('type', 'Unknown')
+            conf = troop.get('confidence', 0.0)
+            x = troop.get('x', 0.0)
+            y = troop.get('y', 0.0)
+            team = troop.get('team', 'unknown')
+            print(f"  {i}. {ttype} ({conf:.3f}) at ({x:.1f}, {y:.1f}) team: {team}")
+        print()  # blank line for readability
         log_state(current_state)
     except json.JSONDecodeError as e:
         print(f"❌ JSON Error: {e}")
@@ -104,7 +106,8 @@ def process_elixir(msg):
     global current_state
     topic, payload = msg.split(b"|", 1)
     current_state["elixir"] = int(payload.decode())
-    print(f"\n🧪 ELIXIR COUNT: {current_state['elixir']}")
+    # Compact output
+    print(f"elixir:{current_state['elixir']}")
     log_state(current_state)
 
 def process_win(msg):
@@ -116,18 +119,16 @@ def process_win(msg):
     # Handle three states: "True", "False", or "ongoing"
     if result_str == "True":
         current_state["win_detection"] = True
-        print(f"\n🏆 WIN - Victory detected!")
     elif result_str == "False":
         current_state["win_detection"] = False
-        print(f"\n💀 LOSE - Defeat detected!")
     elif result_str == "ongoing":
         current_state["win_detection"] = "ongoing"
-        print(f"\n⚔️ ONGOING - Match in progress")
     else:
         # Unexpected value, keep as ongoing
         current_state["win_detection"] = "ongoing"
-        print(f"\n⚠️ Unknown win detection status: {result_str}")
-    
+
+    # Compact output
+    print(f"wincondition:{current_state['win_detection']}")
     log_state(current_state)
 
 def process_cards(msg):
@@ -144,7 +145,15 @@ def process_cards(msg):
                 cards_list.append({"slot": int(slot), "name": name})
     current_state["cards_in_hand"] = cards_list
 
-    print(f"\n🎴 DETECTED CARDS: {cards_list}")
+    # Detailed cards listing
+    print()
+    print("Cards:")
+    if not cards_list:
+        print("  No cards detected")
+    else:
+        for i, c in enumerate(cards_list, 1):
+            name = c.get('name', 'Unknown')
+            print(f"  {i}. {name}")
     log_state(current_state)
 
 # Main loop
