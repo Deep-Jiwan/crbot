@@ -1,0 +1,35 @@
+Winwiner - Setup & Docker Guide
+--------------------------------
+
+Local Startup
+-------------
+python -m venv venv
+venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+
+python winwin.py
+
+
+Docker
+------
+
+# Build image:
+docker build -t winwiner:latest .
+
+# Run container:
+
+# Publisher in same docker network
+docker run --name winwiner --network cr_network -d winwiner:latest
+
+# Use host networking (if network issues persist, ports don’t matter)
+docker run --network=host -e ZMQ_ADDRESS="tcp://localhost:5550" -d winwiner:latest
+
+# Use env file with host networking (ports don’t matter)
+docker run --network=host --env-file .env -d winwiner:latest
+
+
+Container Management
+--------------------
+docker stop winwiner
+docker rm winwiner
+docker rmi winwiner:latest

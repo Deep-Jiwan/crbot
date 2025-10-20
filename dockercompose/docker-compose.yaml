@@ -1,0 +1,81 @@
+networks:
+  cr_network:
+    driver: bridge
+    internal: false
+
+services:
+  gateway:
+    image: alpine/socat
+    container_name: gateway
+    volumes:
+      - ./gateway-entrypoint.sh:/entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    ports:
+      - "5550:5550"
+    networks:
+      - cr_network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+
+
+  windetection:
+    image: ghcr.io/deep-jiwan/crbot/wincheck:latest
+    container_name: windetection
+    env_file:
+      - .env.windetection
+    environment:
+      - ZMQ_ADDRESS=tcp://gateway:5550
+    networks:
+      - cr_network
+    depends_on:
+      - gateway
+    ports:
+      - "5570:5570"
+    restart: unless-stopped
+
+  elixircounter:
+    image: ghcr.io/deep-jiwan/crbot/elixircounter:latest
+    container_name: elixircounter
+    env_file:
+      - .env.elixircounter
+    environment:
+      - ZMQ_ADDRESS=tcp://gateway:5550
+    networks:
+      - cr_network
+    depends_on:
+      - gateway
+    ports:
+      - "5560:5560"
+    restart: unless-stopped
+
+  carddetection:
+    image: ghcr.io/deep-jiwan/crbot/carddetection:latest
+    container_name: carddetection
+    env_file:
+      - .env.carddetection
+    environment:
+      - ZMQ_ADDRESS=tcp://gateway:5550
+    networks:
+      - cr_network
+    depends_on:
+      - gateway
+    ports:
+      - "5590:5590"
+    restart: unless-stopped
+
+  troopdetection:
+    image: ghcr.io/deep-jiwan/crbot/troopdetection:latest
+    container_name: troopdetection
+    env_file:
+      - .env.troopdetection
+    environment:
+      - ZMQ_ADDRESS=tcp://gateway:5550
+    networks:
+      - cr_network
+    depends_on:
+      - gateway
+    ports:
+      - "5580:5580"
+    restart: unless-stopped

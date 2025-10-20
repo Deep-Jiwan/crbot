@@ -1,0 +1,36 @@
+troop Detection - Setup & Docker Guide
+-------------------------------------
+
+Local Startup
+-------------
+python -m venv venv
+venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+
+python troop_detection.py
+
+# Test with:
+
+python troop_receiver.py
+
+
+Docker
+------
+
+# Build image:
+docker build -t troopdetection:latest .
+
+# Run container:
+
+# Publisher in same docker network
+docker run --name troopdetection --env-file .env --network cr_network -d troopdetection:latest
+
+# Use host networking (if netowrk issues persist)
+docker run --network=host --env-file .env -d troopdetection:latest
+
+
+Container Management
+--------------------
+docker stop troopdetection
+docker rm troopdetection
+docker rmi troopdetection:latest

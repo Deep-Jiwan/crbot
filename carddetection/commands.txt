@@ -7,30 +7,30 @@ python -m venv venv
 venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 
-python sample.py
+python card_detection.py
 
 # Test with:
 
-python test.py
+python card_receiver.py
 
 
 Docker
 ------
 
 # Build image:
-docker build -t <image>:latest .
+docker build -t carddetection:latest .
 
 # Run container:
 
 # Publisher in same docker network
-docker run --name <image> --network cr_network -d <image>:latest
+docker run --name carddetection --network cr_network -d carddetection:latest
 
 # Use host networking (if netowrk issues persist)
-docker run --network=host --env-file .env -d <image>:latest
+docker run --network=host --env-file .env -d carddetection:latest
 
 
 Container Management
 --------------------
-docker stop <image>
-docker rm <image>
-docker rmi <image>:latest
+docker stop carddetection
+docker rm carddetection
+docker rmi carddetection:latest
