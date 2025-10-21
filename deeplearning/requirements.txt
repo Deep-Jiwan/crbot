@@ -1,0 +1,13 @@
+torch>=2.0.0
+torchvision>=0.15.0
+numpy>=1.21.0
+opencv-python>=4.5.0
+zmq>=0.0.0
+pyzmq>=24.0.0
+python-dotenv>=1.0.0
+scikit-learn>=1.0.0
+matplotlib>=3.5.0
+tensorboard>=2.10.0
+tqdm>=4.64.0
+pandas>=1.4.0
+pyautogui>=0.9.54
