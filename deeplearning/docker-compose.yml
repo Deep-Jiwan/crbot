@@ -1,0 +1,136 @@
+version: '3.8'
+
+services:
+  clash-royale-ai:
+    build: .
+    container_name: clash-royale-ai-enhanced
+    restart: unless-stopped
+    
+    # Environment variables
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+      - FRAME_WIDTH=1080
+      - FRAME_HEIGHT=1920
+      - ZMQ_ADDRESS=tcp://0.0.0.0:5550
+      - ELIXIR_PORT=5551
+      - CARDS_PORT=5552
+      - TROOPS_PORT=5560
+      - WIN_PORT=5570
+      - AI_PORT=5580
+      - BATCH_SIZE=32
+      - LEARNING_RATE=0.001
+      - EPOCHS=100
+      - HIDDEN_SIZE=256
+      - INPUT_SIZE=15
+      - SEQUENCE_LENGTH=10
+      - ROBOFLOW_API_KEY=${ROBOFLOW_API_KEY:-}
+      - ROBOFLOW_WORKFLOW_ID=${ROBOFLOW_WORKFLOW_ID:-}
+    
+    # Ports for ZeroMQ communication
+    ports:
+      - "5550:5550"  # Main ZMQ
+      - "5551:5551"  # Elixir
+      - "5552:5552"  # Cards
+      - "5560:5560"  # Troops
+      - "5570:5570"  # Win detection
+      - "5580:5580"  # AI decisions
+    
+    # Volumes for persistence
+    volumes:
+      - ./models:/app/models
+      - ./logs:/app/logs
+      - ./data:/app/data
+      - ./checkpoints:/app/checkpoints
+      - ../masterreceiver/game_data_log.jsonl:/app/data/game_data_log.jsonl:ro
+    
+    # Command options
+    command: ["python", "main.py", "--mode", "play", "--required-only"]
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          memory: 2G
+          cpus: '1.0'
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "python", "-c", "import torch; import cv2; import zmq; print('Health check passed')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional: Training service
+  ai-trainer:
+    build: .
+    container_name: clash-royale-ai-trainer
+    profiles: ["training"]
+    restart: "no"
+    
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+      - BATCH_SIZE=32
+      - LEARNING_RATE=0.001
+      - EPOCHS=100
+      - HIDDEN_SIZE=256
+      - INPUT_SIZE=15
+    
+    volumes:
+      - ./models:/app/models
+      - ./logs:/app/logs
+      - ./data:/app/data
+      - ./checkpoints:/app/checkpoints
+      - ../masterreceiver/game_data_log.jsonl:/app/data/game_data_log.jsonl:ro
+    
+    command: ["python", "main.py", "--mode", "train", "--epochs", "100"]
+    
+    deploy:
+      resources:
+        limits:
+          memory: 6G
+          cpus: '4.0'
+
+  # Optional: Data collection service
+  ai-collector:
+    build: .
+    container_name: clash-royale-ai-collector
+    profiles: ["data-collection"]
+    restart: "no"
+    
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+      - FRAME_WIDTH=1080
+      - FRAME_HEIGHT=1920
+      - ZMQ_ADDRESS=tcp://0.0.0.0:5550
+    
+    ports:
+      - "5550:5550"
+      - "5551:5551"
+      - "5552:5552"
+      - "5560:5560"
+      - "5570:5570"
+    
+    volumes:
+      - ./data:/app/data
+      - ../masterreceiver/game_data_log.jsonl:/app/data/game_data_log.jsonl
+    
+    command: ["python", "main.py", "--mode", "collect-data", "--required-only"]
+    
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+
+# Networks
+networks:
+  default:
+    name: clash-royale-ai-network
+    driver: bridge
