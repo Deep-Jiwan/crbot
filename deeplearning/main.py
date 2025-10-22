@@ -179,9 +179,9 @@ class ClashRoyaleAIManager:
         """Run evaluation mode"""
         logger.info("Starting evaluation mode...")
         
-        # Load model
+        # Load enhanced model
         import torch
-        model = ClashRoyaleAI(input_size=7, hidden_size=128)
+        model = ClashRoyaleAI(input_size=15, hidden_size=256)
         checkpoint = torch.load(self.model_path, map_location='cpu')
         model.load_state_dict(checkpoint['model_state_dict'])
         
