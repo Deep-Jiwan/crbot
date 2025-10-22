@@ -59,6 +59,17 @@ Troop Detection → Win Detection
 
 ## Installation
 
+### Option 1: Docker (Recommended)
+```bash
+# Build and run with Docker
+docker-compose build
+docker-compose up -d
+
+# View logs
+docker-compose logs -f clash-royale-ai
+```
+
+### Option 2: Local Installation
 1. **Setup the environment:**
    ```bash
    cd deeplearning
@@ -79,6 +90,22 @@ Troop Detection → Win Detection
 
 ### Quick Start
 
+#### Docker (Recommended)
+```bash
+# Start enhanced AI system
+docker-compose up -d
+
+# Train the model
+docker-compose --profile training up ai-trainer
+
+# Collect data
+docker-compose --profile data-collection up ai-collector
+
+# View logs
+docker-compose logs -f clash-royale-ai
+```
+
+#### Local Installation
 1. **Check system status:**
    ```bash
    python main.py --mode status
