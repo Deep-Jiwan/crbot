@@ -1,0 +1,1 @@
+# Troop detection service module

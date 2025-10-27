@@ -27,3 +27,6 @@ scripts/*
 
 uREADME.md
 game_data_log.jsonl
+
+deeplearning/models/*
+model_test

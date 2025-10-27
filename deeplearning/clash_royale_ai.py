@@ -345,9 +345,9 @@ class ClashRoyaleAgent:
         
         # Subscribe to all game data
         self.sub_socket = self.context.socket(zmq.SUB)
-        self.sub_socket.connect("tcp://localhost:5551")  # Elixir
-        self.sub_socket.connect("tcp://localhost:5552")  # Cards
-        self.sub_socket.connect("tcp://localhost:5560")  # Troops
+        self.sub_socket.connect("tcp://localhost:5560")  # Elixir
+        self.sub_socket.connect("tcp://localhost:5590")  # Cards
+        self.sub_socket.connect("tcp://localhost:5580")  # Troops
         self.sub_socket.connect("tcp://localhost:5570")  # Win detection
         
         self.sub_socket.setsockopt(zmq.SUBSCRIBE, b"ecount|")

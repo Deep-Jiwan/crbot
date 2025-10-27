@@ -1,0 +1,1 @@
+# Card detection service module

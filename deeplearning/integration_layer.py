@@ -57,7 +57,7 @@ class ModuleManager:
                 "script": "elixir_count.py",
                 "env_vars": {
                     "ZMQ_ADDRESS": "tcp://localhost:5550",
-                    "PUB_PORT": "5551",
+                    "PUB_PORT": "5560",
                     "ANNOTATE": "True"
                 },
                 "required": True
@@ -67,7 +67,7 @@ class ModuleManager:
                 "script": "card_detection.py", 
                 "env_vars": {
                     "ZMQ_ADDRESS": "tcp://localhost:5550",
-                    "PUB_PORT": "5552",
+                    "PUB_PORT": "5590",
                     "ROBOFLOW_API_KEY": os.getenv("ROBOFLOW_API_KEY", ""),
                     "ROBOFLOW_WORKFLOW_ID": os.getenv("ROBOFLOW_WORKFLOW_ID", "")
                 },
@@ -78,7 +78,7 @@ class ModuleManager:
                 "script": "troop_detection.py",
                 "env_vars": {
                     "ZMQ_SUB_ADDRESS": "tcp://localhost:5550",
-                    "PUB_PORT": "5560",
+                    "PUB_PORT": "5580",
                     "ROBOFLOW_API_KEY": os.getenv("ROBOFLOW_API_KEY", ""),
                     "ROBOFLOW_WORKFLOW_ID": os.getenv("ROBOFLOW_WORKFLOW_ID", "")
                 },
@@ -97,10 +97,10 @@ class ModuleManager:
                 "path": "../masterreceiver",
                 "script": "main.py",
                 "env_vars": {
-                    "TROOPS_PORT": "5560",
-                    "ELIXIR_PORT": "5551", 
+                    "TROOPS_PORT": "5580",
+                    "ELIXIR_PORT": "5560", 
                     "WIN_PORT": "5570",
-                    "CARDS_PORT": "5552"
+                    "CARDS_PORT": "5590"
                 },
                 "required": False
             }
@@ -251,9 +251,9 @@ class DataAggregator:
         """Setup ZeroMQ connections"""
         # Subscribe to all data sources
         self.sub_socket = self.context.socket(zmq.SUB)
-        self.sub_socket.connect("tcp://localhost:5551")  # Elixir
-        self.sub_socket.connect("tcp://localhost:5552")  # Cards  
-        self.sub_socket.connect("tcp://localhost:5560")  # Troops
+        self.sub_socket.connect("tcp://localhost:5560")  # Elixir
+        self.sub_socket.connect("tcp://localhost:5590")  # Cards  
+        self.sub_socket.connect("tcp://localhost:5580")  # Troops
         self.sub_socket.connect("tcp://localhost:5570")  # Win detection
         
         self.sub_socket.setsockopt(zmq.SUBSCRIBE, b"ecount|")
