@@ -1,6 +1,7 @@
 import pyautogui
 import time
 import os
+import random
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -19,25 +20,31 @@ class GamePlayer:
     def __init__(self):
         # Card slot coordinates (x, y) for cards 0-3 (left to right)
         self.card_slots = [
-            (int(os.getenv("CARD_0_X", "225")), int(os.getenv("CARD_0_Y", "1560"))),  # Card 0 (leftmost)
-            (int(os.getenv("CARD_1_X", "415")), int(os.getenv("CARD_1_Y", "1560"))),  # Card 1
-            (int(os.getenv("CARD_2_X", "605")), int(os.getenv("CARD_2_Y", "1560"))),  # Card 2
-            (int(os.getenv("CARD_3_X", "795")), int(os.getenv("CARD_3_Y", "1560"))),  # Card 3 (rightmost)
+            (int(os.getenv("CARD_0_X", "1489")), int(os.getenv("CARD_0_Y", "900"))),  # Card 0 (leftmost)
+            (int(os.getenv("CARD_1_X", "1604")), int(os.getenv("CARD_1_Y", "900"))),  # Card 1
+            (int(os.getenv("CARD_2_X", "1704")), int(os.getenv("CARD_2_Y", "900"))),  # Card 2
+            (int(os.getenv("CARD_3_X", "1795")), int(os.getenv("CARD_3_Y", "900"))),  # Card 3 (rightmost)
         ]
 
         # Match control coordinates
-        self.start_match_coords = (int(os.getenv("START_MATCH_X", "540")), int(os.getenv("START_MATCH_Y", "1200")))
-        self.end_match_coords = (int(os.getenv("END_MATCH_X", "540")), int(os.getenv("END_MATCH_Y", "1400")))
+        self.start_match_coords = (int(os.getenv("START_MATCH_X", "1603")), int(os.getenv("START_MATCH_Y", "1200")))
+        self.end_match_coords = (int(os.getenv("END_MATCH_X", "1606")), int(os.getenv("END_MATCH_Y", "931")))
+
+        # Arena boundaries
+        self.arena_min_x = int(os.getenv("ARENA_MIN_X", "1380"))
+        self.arena_min_y = int(os.getenv("ARENA_MIN_Y", "140"))
+        self.arena_max_x = int(os.getenv("ARENA_MAX_X", "1834"))
+        self.arena_max_y = int(os.getenv("ARENA_MAX_Y", "757"))
 
         # Delay settings
-        self.click_delay = float(os.getenv("CLICK_DELAY", "0.1"))  # Delay between card selection and placement
+        self.click_delay = float(os.getenv("CLICK_DELAY", "0.5"))  # Delay between card selection and placement
         self.card_select_delay = float(os.getenv("CARD_SELECT_DELAY", "0.5"))  # Delay when selecting cards
 
         print("GamePlayer initialized with coordinates:")
         print(f"Card slots: {self.card_slots}")
         print(f"Start match: {self.start_match_coords}")
         print(f"End match: {self.end_match_coords}")
-
+        print(f"Arena bounds: ({self.arena_min_x}, {self.arena_min_y}) to ({self.arena_max_x}, {self.arena_max_y})")
     def start_match(self):
         """
         Click on the start match button to begin a game.
@@ -49,6 +56,26 @@ class GamePlayer:
             print("Match start command sent")
         except Exception as e:
             print(f"Error starting match: {e}")
+
+    def adjust_coords(self, x, y):
+        """
+        Adjust coordinates to be within arena boundaries.
+        Clamps values to valid range to ensure cards are placed inside the arena.
+        
+        Args:
+            x (int): X coordinate to adjust
+            y (int): Y coordinate to adjust
+            
+        Returns:
+            tuple: (adjusted_x, adjusted_y) within arena bounds
+        """
+        adjusted_x = max(self.arena_min_x, min(x, self.arena_max_x))
+        adjusted_y = max(self.arena_min_y, min(y, self.arena_max_y))
+        
+        if adjusted_x != x or adjusted_y != y:
+            print(f"Adjusted coords from ({x}, {y}) to ({adjusted_x}, {adjusted_y})")
+        
+        return adjusted_x, adjusted_y
 
     def place_card(self, card_no, location_x, location_y):
         """
@@ -64,6 +91,11 @@ class GamePlayer:
             return
 
         try:
+            # Adjust coordinates if outside arena bounds
+            if (location_x < self.arena_min_x or location_x > self.arena_max_x or 
+                location_y < self.arena_min_y or location_y > self.arena_max_y):
+                location_x, location_y = self.adjust_coords(location_x, location_y)
+            
             card_x, card_y = self.card_slots[card_no]
             print(f"Placing card {card_no} from ({card_x}, {card_y}) to ({location_x}, {location_y})")
 
@@ -107,6 +139,54 @@ class GamePlayer:
         """Update end match button coordinates"""
         self.end_match_coords = (x, y)
         print(f"Updated end match coordinates to ({x}, {y})")
+
+    def test_functionality(self):
+        """Test GamePlayer functionality"""
+        print("\n" + "="*50)
+        print("TESTING GAMEPLAYER FUNCTIONALITY")
+        print("="*50)
+        
+        # 1. Start match
+        print("\n1. Starting match...")
+        self.start_match()
+        time.sleep(1)
+        
+        # 2. Select cards 0, 1, 2, 3 (just click, don't deploy)
+        print("\n2. Selecting cards (1 second interval)...")
+        for card in range(4):
+            card_x, card_y = self.card_slots[card]
+            print(f"   Clicking card {card} at ({card_x}, {card_y})")
+            pyautogui.click(card_x, card_y)
+            time.sleep(1)
+        
+        # 3. Deploy cards - Test boundary checking
+        print("\n3. Deploying cards with boundary tests (1 second interval)...")
+        
+        test_positions = [
+            (1500, 400, "INSIDE - Valid center position"),
+            (1600, 600, "INSIDE - Valid lower position"),
+            (2000, 50, "OUTSIDE - X beyond right edge (2000>1834), Y above top edge (50<140)"),
+            (1000, 1000, "OUTSIDE - X beyond left edge (1000<1380), Y below bottom edge (1000>757)"),
+        ]
+        
+        for card, (x, y, description) in enumerate(test_positions):
+            print(f"\n   Test {card + 1}: {description}")
+            print(f"   Requested position: ({x}, {y})")
+            self.place_card(card, x, y)
+            time.sleep(1)
+        
+        # 4. End match
+        print("\n4. Ending match...")
+        self.end_match()
+        time.sleep(1)
+        
+        print("\n" + "="*50)
+        print("TEST COMPLETE")
+        print("="*50)
+        print("\nTest Summary:")
+        print("  - 2 positions inside arena bounds")
+        print("  - 2 positions outside arena bounds (should be adjusted)")
+        print("="*50)
 
 
 # Example usage
