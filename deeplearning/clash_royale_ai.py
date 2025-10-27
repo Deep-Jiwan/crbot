@@ -60,6 +60,131 @@ class Action:
     target_x: Optional[int] = None
     target_y: Optional[int] = None
     confidence: float = 0.0
+    reasoning: str = ""  # Human-readable reasoning for the decision
+    card_name: Optional[str] = None  # Name of the card being played
+    timestamp: float = 0.0
+
+class DecisionLogger:
+    """Logs AI decisions in structured JSON format"""
+    
+    def __init__(self, log_file: str = "ai_decisions.jsonl"):
+        self.log_file = log_file
+        self.setup_logging()
+        
+    def _to_serializable(self, obj):
+        """Convert tensors/ndarrays and nested structures to JSON-serializable types"""
+        # Local imports to avoid hard dependency if modules are unavailable
+        try:
+            import numpy as np  # type: ignore
+        except Exception:
+            np = None  # type: ignore
+        try:
+            import torch  # type: ignore
+        except Exception:
+            torch = None  # type: ignore
+        
+        # Torch tensor
+        if torch is not None and isinstance(obj, torch.Tensor):
+            return obj.detach().cpu().numpy().tolist()
+        
+        # Numpy array/scalars
+        if np is not None:
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            # numpy scalar types
+            if isinstance(obj, (np.floating, np.integer)):
+                return obj.item()
+        
+        # Containers
+        if isinstance(obj, dict):
+            return {k: self._to_serializable(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [self._to_serializable(v) for v in obj]
+        
+        # Fallback
+        return obj
+    
+    def _to_float(self, value, default: float = 0.0) -> float:
+        """Safely convert tensor/ndarray/py types to float scalar"""
+        try:
+            import numpy as np  # type: ignore
+        except Exception:
+            np = None  # type: ignore
+        try:
+            import torch  # type: ignore
+        except Exception:
+            torch = None  # type: ignore
+        
+        try:
+            if torch is not None and isinstance(value, torch.Tensor):
+                arr = value.detach().cpu().numpy()
+                return float(arr.flatten()[0]) if arr.size > 0 else default
+            if np is not None and isinstance(value, np.ndarray):
+                return float(value.flatten()[0]) if value.size > 0 else default
+            return float(value)
+        except Exception:
+            return default
+        
+    def setup_logging(self):
+        """Setup logging configuration"""
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler('ai_decisions.log'),
+                logging.StreamHandler()
+            ]
+        )
+        self.logger = logging.getLogger(__name__)
+    
+    def log_decision(self, game_state: GameState, action: Action, model_outputs: Dict):
+        """Log a complete AI decision with context"""
+        decision_log = {
+            "timestamp": datetime.now().isoformat(),
+            "game_state": {
+                "elixir": game_state.elixir,
+                "cards_in_hand": game_state.cards_in_hand,
+                "enemy_troops": game_state.enemy_troops,
+                "ally_troops": game_state.ally_troops,
+                "win_condition": game_state.win_condition
+            },
+            "action": asdict(action),
+            "model_outputs": {
+                "action_logits": self._to_serializable(model_outputs.get('action_logits', [])),
+                "card_logits": self._to_serializable(model_outputs.get('card_logits', [])),
+                "position": self._to_serializable(model_outputs.get('position', [])),
+                "zone_logits": self._to_serializable(model_outputs.get('zone_logits', [])),
+                "confidence": self._to_float(model_outputs.get('confidence', 0.0), 0.0),
+                "value": self._to_float(model_outputs.get('value', 0.0), 0.0)
+            },
+            "reasoning": action.reasoning
+        }
+        
+        # Write to JSONL file
+        with open(self.log_file, 'a') as f:
+            f.write(json.dumps(decision_log) + '\n')
+        
+        # Log to console
+        self.logger.info(f"AI Decision: {action.action_type} - {action.reasoning}")
+        if action.action_type == "place_card":
+            self.logger.info(f"  Card: {action.card_name} (slot {action.card_slot})")
+            self.logger.info(f"  Position: ({action.target_x}, {action.target_y}) - Zone: {action.target_zone}")
+            self.logger.info(f"  Confidence: {action.confidence:.3f}")
+    
+    def get_recent_decisions(self, count: int = 10) -> List[Dict]:
+        """Get recent decisions from log file"""
+        decisions = []
+        try:
+            with open(self.log_file, 'r') as f:
+                lines = f.readlines()
+                for line in lines[-count:]:
+                    try:
+                        decisions.append(json.loads(line.strip()))
+                    except json.JSONDecodeError:
+                        continue
+        except FileNotFoundError:
+            pass
+        return decisions
 
 class ClashRoyaleDataset(Dataset):
     """Dataset for training the AI model"""
@@ -240,9 +365,9 @@ class ClashRoyaleAgent:
         
         # Subscribe to all game data
         self.sub_socket = self.context.socket(zmq.SUB)
-        self.sub_socket.connect("tcp://localhost:5551")  # Elixir
-        self.sub_socket.connect("tcp://localhost:5552")  # Cards
-        self.sub_socket.connect("tcp://localhost:5560")  # Troops
+        self.sub_socket.connect("tcp://localhost:5560")  # Elixir
+        self.sub_socket.connect("tcp://localhost:5590")  # Cards
+        self.sub_socket.connect("tcp://localhost:5580")  # Troops
         self.sub_socket.connect("tcp://localhost:5570")  # Win detection
         
         self.sub_socket.setsockopt(zmq.SUBSCRIBE, b"ecount|")
