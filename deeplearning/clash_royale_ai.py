@@ -26,8 +26,10 @@ from torch.utils.data import Dataset, DataLoader
 from collections import deque
 import random
 from typing import Dict, List, Tuple, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from dotenv import load_dotenv
+import logging
+from datetime import datetime
 
 # Add parent directory to path to import gameplayer
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'gameplayer'))
@@ -45,12 +47,18 @@ class GameState:
     win_condition: str = "ongoing"  # "ongoing", "win", "lose"
     timestamp: float = 0.0
     frame: Optional[np.ndarray] = None
+    enemy_troops: List[Dict] = None
+    ally_troops: List[Dict] = None
     
     def __post_init__(self):
         if self.cards_in_hand is None:
             self.cards_in_hand = []
         if self.troops_on_field is None:
             self.troops_on_field = []
+        if self.enemy_troops is None:
+            self.enemy_troops = []
+        if self.ally_troops is None:
+            self.ally_troops = []
 
 @dataclass
 class Action:
@@ -59,6 +67,7 @@ class Action:
     card_slot: Optional[int] = None  # 0-3 for card slots
     target_x: Optional[int] = None
     target_y: Optional[int] = None
+    target_zone: Optional[str] = None  # "bottom_left", "bottom_center", "bottom_right", "top_left", "top_center", "top_right"
     confidence: float = 0.0
     reasoning: str = ""  # Human-readable reasoning for the decision
     card_name: Optional[str] = None  # Name of the card being played
@@ -70,60 +79,6 @@ class DecisionLogger:
     def __init__(self, log_file: str = "ai_decisions.jsonl"):
         self.log_file = log_file
         self.setup_logging()
-        
-    def _to_serializable(self, obj):
-        """Convert tensors/ndarrays and nested structures to JSON-serializable types"""
-        # Local imports to avoid hard dependency if modules are unavailable
-        try:
-            import numpy as np  # type: ignore
-        except Exception:
-            np = None  # type: ignore
-        try:
-            import torch  # type: ignore
-        except Exception:
-            torch = None  # type: ignore
-        
-        # Torch tensor
-        if torch is not None and isinstance(obj, torch.Tensor):
-            return obj.detach().cpu().numpy().tolist()
-        
-        # Numpy array/scalars
-        if np is not None:
-            if isinstance(obj, np.ndarray):
-                return obj.tolist()
-            # numpy scalar types
-            if isinstance(obj, (np.floating, np.integer)):
-                return obj.item()
-        
-        # Containers
-        if isinstance(obj, dict):
-            return {k: self._to_serializable(v) for k, v in obj.items()}
-        if isinstance(obj, (list, tuple)):
-            return [self._to_serializable(v) for v in obj]
-        
-        # Fallback
-        return obj
-    
-    def _to_float(self, value, default: float = 0.0) -> float:
-        """Safely convert tensor/ndarray/py types to float scalar"""
-        try:
-            import numpy as np  # type: ignore
-        except Exception:
-            np = None  # type: ignore
-        try:
-            import torch  # type: ignore
-        except Exception:
-            torch = None  # type: ignore
-        
-        try:
-            if torch is not None and isinstance(value, torch.Tensor):
-                arr = value.detach().cpu().numpy()
-                return float(arr.flatten()[0]) if arr.size > 0 else default
-            if np is not None and isinstance(value, np.ndarray):
-                return float(value.flatten()[0]) if value.size > 0 else default
-            return float(value)
-        except Exception:
-            return default
         
     def setup_logging(self):
         """Setup logging configuration"""
@@ -150,12 +105,11 @@ class DecisionLogger:
             },
             "action": asdict(action),
             "model_outputs": {
-                "action_logits": self._to_serializable(model_outputs.get('action_logits', [])),
-                "card_logits": self._to_serializable(model_outputs.get('card_logits', [])),
-                "position": self._to_serializable(model_outputs.get('position', [])),
-                "zone_logits": self._to_serializable(model_outputs.get('zone_logits', [])),
-                "confidence": self._to_float(model_outputs.get('confidence', 0.0), 0.0),
-                "value": self._to_float(model_outputs.get('value', 0.0), 0.0)
+                "action_logits": model_outputs.get('action_logits', []).tolist() if isinstance(model_outputs.get('action_logits'), np.ndarray) else model_outputs.get('action_logits', []),
+                "card_logits": model_outputs.get('card_logits', []).tolist() if isinstance(model_outputs.get('card_logits'), np.ndarray) else model_outputs.get('card_logits', []),
+                "position": model_outputs.get('position', []).tolist() if isinstance(model_outputs.get('position'), np.ndarray) else model_outputs.get('position', []),
+                "confidence": float(model_outputs.get('confidence', 0.0)),
+                "value": float(model_outputs.get('value', 0.0))
             },
             "reasoning": action.reasoning
         }
@@ -240,15 +194,22 @@ class ClashRoyaleDataset(Dataset):
 class ClashRoyaleAI(nn.Module):
     """Main AI model for Clash Royale decision making"""
     
-    def __init__(self, input_size: int = 3, hidden_size: int = 128, num_actions: int = 5):
+    def __init__(self, input_size: int = 15, hidden_size: int = 256, num_actions: int = 5):
         super(ClashRoyaleAI, self).__init__()
         
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.num_actions = num_actions
         
+        # Enhanced input processing
+        self.input_encoder = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.ReLU(),
+            nn.Dropout(0.1)
+        )
+        
         # LSTM for sequence processing
-        self.lstm = nn.LSTM(input_size, hidden_size, batch_first=True)
+        self.lstm = nn.LSTM(hidden_size, hidden_size, batch_first=True, num_layers=2)
         
         # Attention mechanism
         self.attention = nn.MultiheadAttention(hidden_size, num_heads=8, batch_first=True)
@@ -257,6 +218,7 @@ class ClashRoyaleAI(nn.Module):
         self.action_head = nn.Linear(hidden_size, num_actions)
         self.card_head = nn.Linear(hidden_size, 4)  # 4 card slots
         self.position_head = nn.Linear(hidden_size, 2)  # x, y coordinates
+        self.zone_head = nn.Linear(hidden_size, 6)  # 6 zones: bottom_left, bottom_center, bottom_right, top_left, top_center, top_right
         self.confidence_head = nn.Linear(hidden_size, 1)
         
         # Value function for reinforcement learning
@@ -269,8 +231,11 @@ class ClashRoyaleAI(nn.Module):
         # x shape: (batch_size, sequence_length, input_size)
         batch_size = x.size(0)
         
+        # Encode input features
+        encoded_input = self.input_encoder(x)
+        
         # LSTM processing
-        lstm_out, (hidden, cell) = self.lstm(x)
+        lstm_out, (hidden, cell) = self.lstm(encoded_input)
         
         # Apply attention
         attn_out, _ = self.attention(lstm_out, lstm_out, lstm_out)
@@ -283,6 +248,7 @@ class ClashRoyaleAI(nn.Module):
         action_logits = self.action_head(last_output)
         card_logits = self.card_head(last_output)
         position = self.position_head(last_output)
+        zone_logits = self.zone_head(last_output)
         confidence = torch.sigmoid(self.confidence_head(last_output))
         value = self.value_head(last_output)
         
@@ -290,6 +256,7 @@ class ClashRoyaleAI(nn.Module):
             'action_logits': action_logits,
             'card_logits': card_logits,
             'position': position,
+            'zone_logits': zone_logits,
             'confidence': confidence,
             'value': value
         }
@@ -316,9 +283,9 @@ class ClashRoyaleAgent:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         print(f"Using device: {self.device}")
         
-        # Initialize model
-        self.model = ClashRoyaleAI().to(self.device)
-        self.target_model = ClashRoyaleAI().to(self.device)
+        # Initialize model with enhanced input size
+        self.model = ClashRoyaleAI(input_size=15, hidden_size=256).to(self.device)
+        self.target_model = ClashRoyaleAI(input_size=15, hidden_size=256).to(self.device)
         self.target_model.load_state_dict(self.model.state_dict())
         
         # Load pretrained model if available
@@ -336,6 +303,9 @@ class ClashRoyaleAgent:
         self.current_state = GameState()
         self.state_history = deque(maxlen=100)
         
+        # Decision logging
+        self.decision_logger = DecisionLogger()
+        
         # ZeroMQ setup
         self.setup_zmq()
         
@@ -349,6 +319,16 @@ class ClashRoyaleAgent:
             2: "start_match", 
             3: "end_match",
             4: "defend"
+        }
+        
+        # Zone mapping for position prediction
+        self.zone_map = {
+            0: "bottom_left",
+            1: "bottom_center", 
+            2: "bottom_right",
+            3: "top_left",
+            4: "top_center",
+            5: "top_right"
         }
         
         # Training parameters
@@ -386,7 +366,13 @@ class ClashRoyaleAgent:
         elif topic == "cards":
             self.current_state.cards_in_hand = self._parse_cards(data)
         elif topic == "troops":
-            self.current_state.troops_on_field = self._parse_troops(data)
+            troops = self._parse_troops(data)
+            self.current_state.troops_on_field = troops
+            
+            # Separate enemy and ally troops
+            self.current_state.enemy_troops = [t for t in troops if t.get('team') == 'enemy']
+            self.current_state.ally_troops = [t for t in troops if t.get('team') == 'ally']
+            
         elif topic == "winner":
             self.current_state.win_condition = data
         
@@ -423,23 +409,99 @@ class ClashRoyaleAgent:
             return []
     
     def get_state_features(self) -> np.ndarray:
-        """Convert current game state to feature vector"""
+        """Convert current game state to enhanced feature vector"""
+        # Basic features
+        elixir = self.current_state.elixir
+        cards_count = len(self.current_state.cards_in_hand)
+        troops_count = len(self.current_state.troops_on_field)
+        
+        # Enhanced features
+        enemy_troops = self.current_state.enemy_troops
+        ally_troops = self.current_state.ally_troops
+        
+        # Enemy troop features
+        enemy_count = len(enemy_troops)
+        enemy_avg_x = np.mean([t.get('x', 0) for t in enemy_troops]) if enemy_troops else 0
+        enemy_avg_y = np.mean([t.get('y', 0) for t in enemy_troops]) if enemy_troops else 0
+        
+        # Ally troop features  
+        ally_count = len(ally_troops)
+        ally_avg_x = np.mean([t.get('x', 0) for t in ally_troops]) if ally_troops else 0
+        ally_avg_y = np.mean([t.get('y', 0) for t in ally_troops]) if ally_troops else 0
+        
+        # Card features
+        card_names = [card.get('name', '') for card in self.current_state.cards_in_hand]
+        unique_cards = len(set(card_names))
+        
+        # Win condition encoding
+        win_condition = self.current_state.win_condition
+        if win_condition == "win":
+            win_encoded = 1.0
+        elif win_condition == "lose":
+            win_encoded = -1.0
+        else:
+            win_encoded = 0.0
+        
+        # Troop balance
+        troop_balance = ally_count - enemy_count
+        
+        # Distance between enemy and ally troops
+        if enemy_troops and ally_troops:
+            min_distance = min([
+                np.sqrt((e.get('x', 0) - a.get('x', 0))**2 + (e.get('y', 0) - a.get('y', 0))**2)
+                for e in enemy_troops for a in ally_troops
+            ])
+        else:
+            min_distance = 1000.0  # Large distance if no troops
+        
         features = np.array([
-            self.current_state.elixir,
-            len(self.current_state.cards_in_hand),
-            len(self.current_state.troops_on_field)
+            elixir,
+            cards_count,
+            troops_count,
+            enemy_count,
+            ally_count,
+            enemy_avg_x,
+            enemy_avg_y,
+            ally_avg_x,
+            ally_avg_y,
+            unique_cards,
+            win_encoded,
+            troop_balance,
+            min_distance,
+            len(self.current_state.cards_in_hand),  # Redundant but kept for compatibility
+            time.time() - self.current_state.timestamp  # Time since last update
         ], dtype=np.float32)
+        
         return features
     
-    def select_action(self, state_features: np.ndarray, training: bool = True) -> Action:
-        """Select action using epsilon-greedy policy"""
+    def select_action(self, state_features: np.ndarray, training: bool = True) -> Tuple[Action, Dict]:
+        """Select action using epsilon-greedy policy with enhanced reasoning"""
         if training and random.random() < self.epsilon:
             # Random action for exploration
             action_type = random.choice(list(self.action_map.values()))
             card_slot = random.randint(0, 3) if action_type == "place_card" else None
             target_x = random.randint(200, 880) if action_type == "place_card" else None
             target_y = random.randint(200, 1200) if action_type == "place_card" else None
-            return Action(action_type, card_slot, target_x, target_y, 0.5)
+            target_zone = random.choice(list(self.zone_map.values())) if action_type == "place_card" else None
+            
+            reasoning = f"Random exploration: {action_type}"
+            if action_type == "place_card":
+                card_name = self.current_state.cards_in_hand[card_slot].get('name', 'Unknown') if card_slot < len(self.current_state.cards_in_hand) else 'Unknown'
+                reasoning += f" with {card_name} at {target_zone}"
+            
+            action = Action(
+                action_type=action_type,
+                card_slot=card_slot,
+                target_x=target_x,
+                target_y=target_y,
+                target_zone=target_zone,
+                confidence=0.5,
+                reasoning=reasoning,
+                card_name=card_name if action_type == "place_card" else None,
+                timestamp=time.time()
+            )
+            
+            return action, {}
         
         # Use model for action selection
         with torch.no_grad():
@@ -449,6 +511,7 @@ class ClashRoyaleAgent:
             action_logits = outputs['action_logits']
             card_logits = outputs['card_logits']
             position = outputs['position']
+            zone_logits = outputs['zone_logits']
             confidence = outputs['confidence']
             
             # Select action
@@ -459,16 +522,77 @@ class ClashRoyaleAgent:
             card_slot = None
             target_x = None
             target_y = None
+            target_zone = None
+            card_name = None
+            reasoning = ""
             
             if action_type == "place_card":
                 card_slot = torch.argmax(card_logits).item()
+                zone_idx = torch.argmax(zone_logits).item()
+                target_zone = self.zone_map[zone_idx]
+                
+                # Get card name
+                if card_slot < len(self.current_state.cards_in_hand):
+                    card_name = self.current_state.cards_in_hand[card_slot].get('name', 'Unknown')
+                else:
+                    card_name = 'Unknown'
+                
                 # Convert normalized position to actual coordinates
                 target_x = int(position[0, 0].item() * 680 + 200)  # Scale to game area
                 target_y = int(position[0, 1].item() * 1000 + 200)
+                
+                # Generate reasoning
+                reasoning = self._generate_reasoning(action_type, card_name, target_zone, confidence[0, 0].item())
+            else:
+                reasoning = self._generate_reasoning(action_type, None, None, confidence[0, 0].item())
             
             conf_value = confidence[0, 0].item()
             
-            return Action(action_type, card_slot, target_x, target_y, conf_value)
+            action = Action(
+                action_type=action_type,
+                card_slot=card_slot,
+                target_x=target_x,
+                target_y=target_y,
+                target_zone=target_zone,
+                confidence=conf_value,
+                reasoning=reasoning,
+                card_name=card_name,
+                timestamp=time.time()
+            )
+            
+            return action, outputs
+    
+    def _generate_reasoning(self, action_type: str, card_name: Optional[str], target_zone: Optional[str], confidence: float) -> str:
+        """Generate human-readable reasoning for AI decisions"""
+        if action_type == "place_card":
+            reasoning = f"Playing {card_name} at {target_zone} zone"
+            
+            # Add context-based reasoning
+            if len(self.current_state.enemy_troops) > len(self.current_state.ally_troops):
+                reasoning += " to counter enemy advantage"
+            elif self.current_state.elixir > 8:
+                reasoning += " to use excess elixir"
+            elif len(self.current_state.cards_in_hand) == 4:
+                reasoning += " to cycle cards"
+            else:
+                reasoning += " based on current game state"
+                
+            reasoning += f" (confidence: {confidence:.2f})"
+            
+        elif action_type == "wait":
+            reasoning = f"Waiting for better opportunity (confidence: {confidence:.2f})"
+            if self.current_state.elixir < 3:
+                reasoning += " - need more elixir"
+            elif len(self.current_state.cards_in_hand) < 2:
+                reasoning += " - waiting for more cards"
+                
+        elif action_type == "defend":
+            reasoning = f"Defending against enemy troops (confidence: {confidence:.2f})"
+            
+        else:
+            reasoning = f"Executing {action_type} (confidence: {confidence:.2f})"
+            
+        return reasoning
     
     def execute_action(self, action: Action):
         """Execute the selected action using GamePlayer"""
@@ -553,7 +677,10 @@ class ClashRoyaleAgent:
                 # Make decision if enough time has passed
                 if current_time - last_action_time >= action_interval:
                     state_features = self.get_state_features()
-                    action = self.select_action(state_features, training)
+                    action, model_outputs = self.select_action(state_features, training)
+                    
+                    # Log decision
+                    self.decision_logger.log_decision(self.current_state, action, model_outputs)
                     
                     # Execute action
                     self.execute_action(action)

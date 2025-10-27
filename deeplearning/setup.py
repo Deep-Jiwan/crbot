@@ -84,8 +84,9 @@ BATCH_SIZE=32
 LEARNING_RATE=0.001
 EPOCHS=100
 
-# Model configuration
-HIDDEN_SIZE=128
+# Enhanced Model configuration
+HIDDEN_SIZE=256
+INPUT_SIZE=15
 SEQUENCE_LENGTH=10
 
 # Game player coordinates (adjust for your setup)

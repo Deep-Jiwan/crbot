@@ -92,7 +92,7 @@ class DataPreprocessor:
         return np.array(sequences), np.array(rewards)
     
     def _extract_features(self, sequence: List[Dict]) -> np.ndarray:
-        """Extract features from a sequence of game states"""
+        """Extract enhanced features from a sequence of game states"""
         features = []
         
         for state in sequence:
@@ -100,6 +100,21 @@ class DataPreprocessor:
             elixir = state.get('elixir', 0)
             cards_count = len(state.get('cards_in_hand', []))
             troops_count = len(state.get('troops', []))
+            
+            # Enhanced troop analysis
+            troops = state.get('troops', [])
+            enemy_troops = [t for t in troops if t.get('team') == 'enemy']
+            ally_troops = [t for t in troops if t.get('team') == 'ally']
+            
+            # Enemy troop features
+            enemy_count = len(enemy_troops)
+            enemy_avg_x = np.mean([t.get('x', 0) for t in enemy_troops]) if enemy_troops else 0
+            enemy_avg_y = np.mean([t.get('y', 0) for t in enemy_troops]) if enemy_troops else 0
+            
+            # Ally troop features  
+            ally_count = len(ally_troops)
+            ally_avg_x = np.mean([t.get('x', 0) for t in ally_troops]) if ally_troops else 0
+            ally_avg_y = np.mean([t.get('y', 0) for t in ally_troops]) if ally_troops else 0
             
             # Win condition encoding
             win_condition = state.get('win_detection', 'ongoing')
@@ -110,27 +125,43 @@ class DataPreprocessor:
             else:
                 win_encoded = 0.0
             
-            # Card diversity (number of unique cards)
+            # Card features
             cards = state.get('cards_in_hand', [])
-            unique_cards = len(set(card.get('name', '') for card in cards))
+            card_names = [card.get('name', '') for card in cards]
+            unique_cards = len(set(card_names))
             
-            # Troop diversity
-            troops = state.get('troops', [])
-            unique_troops = len(set(troop.get('type', '') for troop in troops))
+            # Troop balance
+            troop_balance = ally_count - enemy_count
             
-            # Enemy vs ally troop ratio
-            enemy_troops = sum(1 for troop in troops if troop.get('team') == 'enemy')
-            ally_troops = sum(1 for troop in troops if troop.get('team') == 'ally')
-            troop_ratio = enemy_troops / max(ally_troops, 1)
+            # Distance between enemy and ally troops
+            if enemy_troops and ally_troops:
+                min_distance = min([
+                    np.sqrt((e.get('x', 0) - a.get('x', 0))**2 + (e.get('y', 0) - a.get('y', 0))**2)
+                    for e in enemy_troops for a in ally_troops
+                ])
+            else:
+                min_distance = 1000.0  # Large distance if no troops
+            
+            # Time-based features
+            timestamp = state.get('timestamp', 0)
+            time_since_start = timestamp - sequence[0].get('timestamp', timestamp) if sequence else 0
             
             feature_vector = [
                 elixir,
                 cards_count,
                 troops_count,
-                win_encoded,
+                enemy_count,
+                ally_count,
+                enemy_avg_x,
+                enemy_avg_y,
+                ally_avg_x,
+                ally_avg_y,
                 unique_cards,
-                unique_troops,
-                troop_ratio
+                win_encoded,
+                troop_balance,
+                min_distance,
+                len(cards),  # Redundant but kept for compatibility
+                time_since_start
             ]
             
             features.append(feature_vector)
@@ -182,8 +213,8 @@ class ModelTrainer:
         # Setup tensorboard
         self.writer = SummaryWriter(config.log_dir)
         
-        # Initialize model
-        self.model = ClashRoyaleAI(input_size=7, hidden_size=128).to(self.device)
+        # Initialize model with enhanced input size
+        self.model = ClashRoyaleAI(input_size=15, hidden_size=256).to(self.device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=config.learning_rate)
         self.criterion = nn.MSELoss()
         
@@ -489,8 +520,8 @@ def main():
             logger.error("Checkpoint path required for evaluation")
             return
         
-        # Load model
-        model = ClashRoyaleAI(input_size=7, hidden_size=128).to(config.device)
+        # Load model with enhanced input size
+        model = ClashRoyaleAI(input_size=15, hidden_size=256).to(config.device)
         checkpoint = torch.load(args.checkpoint, map_location=config.device)
         model.load_state_dict(checkpoint['model_state_dict'])
         
@@ -548,3 +579,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

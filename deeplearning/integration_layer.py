@@ -317,7 +317,7 @@ class DataAggregator:
         return cards
     
     def _parse_troops(self, troops_data: str) -> List[Dict]:
-        """Parse troop data"""
+        """Parse troop data with enhanced team detection"""
         try:
             troops_json = json.loads(troops_data)
             troops = []
@@ -325,12 +325,23 @@ class DataAggregator:
                 for result in troops_json:
                     predictions = result.get("predictions", {}).get("predictions", [])
                     for pred in predictions:
+                        # Enhanced team detection
+                        class_name = pred.get("class", "").lower()
+                        if "enemy" in class_name or "opponent" in class_name:
+                            team = "enemy"
+                        elif "ally" in class_name or "friendly" in class_name or "player" in class_name:
+                            team = "ally"
+                        else:
+                            # Default team assignment based on position
+                            y_pos = float(pred.get("y", 0))
+                            team = "enemy" if y_pos < 960 else "ally"  # Assuming 1920 height, enemy is top half
+                        
                         troops.append({
                             "type": pred.get("class", "Unknown"),
                             "confidence": float(pred.get("confidence", 0)),
                             "x": float(pred.get("x", 0)),
                             "y": float(pred.get("y", 0)),
-                            "team": "enemy" if "enemy" in pred.get("class", "").lower() else "ally"
+                            "team": team
                         })
             return troops
         except json.JSONDecodeError:
@@ -475,3 +486,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
