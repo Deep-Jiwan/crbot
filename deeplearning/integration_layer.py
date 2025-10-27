@@ -19,6 +19,8 @@ import zmq
 import numpy as np
 import cv2
 from dotenv import load_dotenv
+from utils.data_aggregator import DataAggregator
+from utils.health_checker import HealthChecker
 
 # Load environment variables
 load_dotenv()
@@ -231,138 +233,13 @@ class ModuleManager:
             }
         return status
 
-class DataAggregator:
-    """Aggregates data from all modules and provides unified interface"""
-    
-    def __init__(self):
-        self.context = zmq.Context()
-        self.setup_zmq()
-        self.current_data = {
-            "elixir": 0,
-            "cards": [],
-            "troops": [],
-            "win_condition": "ongoing",
-            "timestamp": 0
-        }
-        self.data_lock = threading.Lock()
-        self.running = False
-        
-    def setup_zmq(self):
-        """Setup ZeroMQ connections"""
-        # Subscribe to all data sources
-        self.sub_socket = self.context.socket(zmq.SUB)
-        self.sub_socket.connect("tcp://localhost:5560")  # Elixir
-        self.sub_socket.connect("tcp://localhost:5590")  # Cards  
-        self.sub_socket.connect("tcp://localhost:5580")  # Troops
-        self.sub_socket.connect("tcp://localhost:5570")  # Win detection
-        
-        self.sub_socket.setsockopt(zmq.SUBSCRIBE, b"ecount|")
-        self.sub_socket.setsockopt(zmq.SUBSCRIBE, b"cards|")
-        self.sub_socket.setsockopt(zmq.SUBSCRIBE, b"troops|")
-        self.sub_socket.setsockopt(zmq.SUBSCRIBE, b"winner|")
-        
-        # Set timeout for non-blocking receive
-        self.sub_socket.setsockopt(zmq.RCVTIMEO, 100)  # 100ms timeout
-    
-    def start(self):
-        """Start data aggregation in background thread"""
-        self.running = True
-        self.thread = threading.Thread(target=self._aggregate_loop, daemon=True)
-        self.thread.start()
-        print("Data aggregator started")
-    
-    def stop(self):
-        """Stop data aggregation"""
-        self.running = False
-        if hasattr(self, 'thread'):
-            self.thread.join()
-        print("Data aggregator stopped")
-    
-    def _aggregate_loop(self):
-        """Main aggregation loop"""
-        while self.running:
-            try:
-                msg = self.sub_socket.recv()
-                topic, data = msg.decode().split("|", 1)
-                self._process_message(topic, data)
-            except zmq.Again:
-                # Timeout - continue loop
-                continue
-            except Exception as e:
-                print(f"Error in data aggregation: {e}")
-                time.sleep(0.1)
-    
-    def _process_message(self, topic: str, data: str):
-        """Process incoming message and update current data"""
-        with self.data_lock:
-            if topic == "ecount":
-                self.current_data["elixir"] = int(data)
-            elif topic == "cards":
-                self.current_data["cards"] = self._parse_cards(data)
-            elif topic == "troops":
-                self.current_data["troops"] = self._parse_troops(data)
-            elif topic == "winner":
-                self.current_data["win_condition"] = data
-            
-            self.current_data["timestamp"] = time.time()
-    
-    def _parse_cards(self, cards_data: str) -> List[Dict]:
-        """Parse card data"""
-        cards = []
-        if cards_data:
-            for card_info in cards_data.split(","):
-                if ":" in card_info:
-                    slot, name = card_info.split(":", 1)
-                    cards.append({"slot": int(slot), "name": name})
-        return cards
-    
-    def _parse_troops(self, troops_data: str) -> List[Dict]:
-        """Parse troop data with enhanced team detection"""
-        try:
-            troops_json = json.loads(troops_data)
-            troops = []
-            if isinstance(troops_json, list) and troops_json:
-                for result in troops_json:
-                    predictions = result.get("predictions", {}).get("predictions", [])
-                    for pred in predictions:
-                        # Enhanced team detection
-                        class_name = pred.get("class", "").lower()
-                        if "enemy" in class_name or "opponent" in class_name:
-                            team = "enemy"
-                        elif "ally" in class_name or "friendly" in class_name or "player" in class_name:
-                            team = "ally"
-                        else:
-                            # Default team assignment based on position
-                            y_pos = float(pred.get("y", 0))
-                            team = "enemy" if y_pos < 960 else "ally"  # Assuming 1920 height, enemy is top half
-                        
-                        troops.append({
-                            "type": pred.get("class", "Unknown"),
-                            "confidence": float(pred.get("confidence", 0)),
-                            "x": float(pred.get("x", 0)),
-                            "y": float(pred.get("y", 0)),
-                            "team": team
-                        })
-            return troops
-        except json.JSONDecodeError:
-            return []
-    
-    def get_current_data(self) -> Dict:
-        """Get current aggregated data"""
-        with self.data_lock:
-            return self.current_data.copy()
-    
-    def cleanup(self):
-        """Cleanup resources"""
-        self.sub_socket.close()
-        self.context.term()
-
 class AIController:
     """Main controller that orchestrates all components"""
     
     def __init__(self):
         self.module_manager = ModuleManager()
         self.data_aggregator = DataAggregator()
+        self.health_checker = HealthChecker()
         self.ai_agent = None
         self.running = False
         
@@ -374,6 +251,12 @@ class AIController:
         if start_modules:
             if not self.module_manager.start_all_modules(required_only):
                 print("Failed to start required modules")
+                return False
+            
+            # Wait for services to become healthy
+            print("\nWaiting for services to start...")
+            if not self.health_checker.wait_for_services(timeout_sec=30, required_only=required_only):
+                print("Services did not become healthy in time")
                 return False
         
         # Start data aggregation
@@ -439,10 +322,21 @@ class AIController:
     
     def get_status(self) -> Dict:
         """Get status of all components"""
+        # Get latest health check
+        health_results = self.health_checker.check_all_services(verbose=False)
+        
         return {
             "running": self.running,
             "modules": self.module_manager.get_module_status(),
-            "data": self.data_aggregator.get_current_data()
+            "data": self.data_aggregator.get_current_data(),
+            "health": {
+                name: {
+                    "healthy": result.is_healthy,
+                    "response_time_ms": result.response_time_ms,
+                    "error": result.error_message
+                }
+                for name, result in health_results.items()
+            }
         }
 
 def main():
