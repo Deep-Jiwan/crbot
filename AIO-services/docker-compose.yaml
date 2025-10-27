@@ -1,0 +1,40 @@
+networks:
+  cr_network_aio:
+    driver: bridge
+    internal: false
+
+services:
+  gateway:
+    image: alpine/socat
+    container_name: aio-gateway
+    volumes:
+      - ./gateway-entrypoint.sh:/entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    ports:
+      - "5550:5550"
+    networks:
+      - cr_network_aio
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # All-In-One Services Container
+  # Replaces: windetection, elixircounter, carddetection, troopdetection
+  aio-services:
+    image: ghcr.io/deep-jiwan/crbot/aio-services:latest
+    container_name: aio-services
+    env_file:
+      - .env.aio
+    environment:
+      - ZMQ_ADDRESS=tcp://gateway:5550
+      - ZMQ_SUB_ADDRESS=tcp://gateway:5550
+    networks:
+      - cr_network_aio
+    depends_on:
+      - gateway
+    ports:
+      - "5570:5570"  # WinWin Detection
+      - "5560:5560"  # Elixir Counter
+      - "5590:5590"  # Card Detection
+      - "5580:5580"  # Troop Detection
+    restart: unless-stopped
