@@ -9,6 +9,7 @@ import sys
 import time
 import json
 import threading
+import random
 import numpy as np
 import cv2
 import zmq
@@ -94,12 +95,31 @@ def _load_zone_coords():
     # If still empty, use sensible defaults (from provided values)
     if not coords:
         coords = {
+            # Main placement zones (for PPO model)
             "bottom_left": (1390, 762),
             "bottom_center": (1611, 658),
             "bottom_right": (1816, 725),
             "top_left": (1404, 472),
             "top_center": (1606, 489),
-            "top_right": (1810, 489)
+            "top_right": (1810, 489),
+            
+            # Defensive zones
+            "defend_left": (1459, 546),
+            "defend_right": (1752, 546),
+            "defend_center_top": (1606, 491),
+            "defend_center": (1602, 660),
+            
+            # Tactical zones
+            "back_center": (1611, 850),           # Back support position
+            "front_center": (1611, 580),          # Front push position
+            "counter_left": (1450, 650),          # Counter-push left
+            "counter_right": (1750, 650),         # Counter-push right
+            "split_left": (1400, 720),            # Split push left
+            "split_right": (1800, 720),           # Split push right
+            "tank_center": (1611, 600),           # Tank push center
+            "support_back": (1611, 800),          # Back line support
+            "air_support_center": (1611, 650),    # Air unit support
+            "default_placement": (1611, 680)      # Default fallback
         }
 
     # Persist coordinates to coordinates.json for future runs
@@ -721,24 +741,21 @@ class ClashRoyalePPOAgent:
     
     def _get_defensive_position(self) -> Dict:
         """Get tactical defensive position based on enemy threats"""
-        enemy_troops = self.current_state.enemy_troops
+        # Define defensive zones in priority order
+        defensive_zones = ["defend_left", "defend_right", "defend_center_top", "defend_center"]
         
-        if not enemy_troops:
-            # Default back center if no enemies
-            return {'x': 540, 'y': 1000, 'zone': 'back_center'}
+        # Filter to only zones that exist in ZONE_COORDS
+        available_zones = [zone for zone in defensive_zones if zone in ZONE_COORDS]
         
-        # Analyze enemy positions
-        enemy_left = sum(1 for t in enemy_troops if t.get('x', 540) < 360)
-        enemy_right = sum(1 for t in enemy_troops if t.get('x', 540) > 720)
-        enemy_center = len(enemy_troops) - enemy_left - enemy_right
+        if not available_zones:
+            # Fallback to defend_center coordinate if no defensive zones defined
+            return {'x': 1602, 'y': 660, 'zone': 'defend_center'}
         
-        # Choose defensive position based on threat
-        if enemy_left > enemy_right and enemy_left > enemy_center:
-            return {'x': 300, 'y': 900, 'zone': 'left_defense'}
-        elif enemy_right > enemy_left and enemy_right > enemy_center:
-            return {'x': 780, 'y': 900, 'zone': 'right_defense'}
-        else:
-            return {'x': 540, 'y': 950, 'zone': 'center_defense'}
+        # Randomly select a defensive zone
+        selected_zone = random.choice(available_zones)
+        x, y = ZONE_COORDS[selected_zone]
+        
+        return {'x': x, 'y': y, 'zone': selected_zone}
     
     def _is_spell(self, card_name: str) -> bool:
         """Check if card is a spell"""
@@ -758,34 +775,49 @@ class ClashRoyalePPOAgent:
         if 'fireball' in name:
             # Fireball: Target clusters of enemies or high-value targets
             if len(enemy_troops) >= 2:
-                # Find cluster center
+                # Find cluster center - use actual enemy positions
                 avg_x = sum(t.get('x', 540) for t in enemy_troops) / len(enemy_troops)
                 avg_y = sum(t.get('y', 400) for t in enemy_troops) / len(enemy_troops)
                 return {'x': int(avg_x), 'y': int(avg_y), 'target': 'enemy_cluster'}
             elif len(enemy_troops) == 1:
-                # Single high-value target
+                # Single high-value target - use actual enemy position
                 target = enemy_troops[0]
                 return {'x': int(target.get('x', 540)), 'y': int(target.get('y', 400)), 'target': 'single_enemy'}
+            else:
+                # No enemies, use defend_center_top as default spell location
+                if 'defend_center_top' in ZONE_COORDS:
+                    x, y = ZONE_COORDS['defend_center_top']
+                    return {'x': x, 'y': y, 'target': 'defend_center_top'}
         
         elif 'arrows' in name:
             # Arrows: Target swarms or air units
             air_units = [t for t in enemy_troops if 'minion' in t.get('type', '').lower() or 'dragon' in t.get('type', '').lower()]
             if air_units:
+                # Use actual air unit positions
                 avg_x = sum(t.get('x', 540) for t in air_units) / len(air_units)
                 avg_y = sum(t.get('y', 400) for t in air_units) / len(air_units)
                 return {'x': int(avg_x), 'y': int(avg_y), 'target': 'air_swarm'}
             elif len(enemy_troops) >= 3:
-                # Target swarm
+                # Target swarm - use actual enemy positions
                 avg_x = sum(t.get('x', 540) for t in enemy_troops) / len(enemy_troops)
                 avg_y = sum(t.get('y', 400) for t in enemy_troops) / len(enemy_troops)
                 return {'x': int(avg_x), 'y': int(avg_y), 'target': 'ground_swarm'}
+            else:
+                # No good targets, use defend_center as default
+                if 'defend_center' in ZONE_COORDS:
+                    x, y = ZONE_COORDS['defend_center']
+                    return {'x': x, 'y': y, 'target': 'defend_center'}
         
         return None  # No good target found
     
     def _get_tactical_position(self, card_name: str) -> Dict:
-        """Get tactical position for troop cards"""
+        """Get tactical position for troop cards using ZONE_COORDS"""
         if not card_name:
-            return {'x': 540, 'y': 800, 'strategy': 'default'}
+            # Use default_placement region
+            if 'default_placement' in ZONE_COORDS:
+                x, y = ZONE_COORDS['default_placement']
+                return {'x': x, 'y': y, 'strategy': 'default'}
+            return {'x': 1611, 'y': 680, 'strategy': 'default'}
         
         name = card_name.lower()
         enemy_troops = self.current_state.enemy_troops
@@ -794,50 +826,82 @@ class ClashRoyalePPOAgent:
         # Giant: Front tank position
         if 'giant' in name:
             if enemy_troops:
-                # Push toward enemies
+                # Push toward enemies - use actual enemy position for targeting
                 enemy_avg_x = sum(t.get('x', 540) for t in enemy_troops) / len(enemy_troops)
-                return {'x': int(enemy_avg_x), 'y': 700, 'strategy': 'tank_push'}
-            return {'x': 540, 'y': 700, 'strategy': 'center_push'}
+                # But use tank_center y-coordinate for consistency
+                y = ZONE_COORDS.get('tank_center', (1611, 600))[1]
+                return {'x': int(enemy_avg_x), 'y': y, 'strategy': 'tank_push'}
+            # Use tank_center region
+            if 'tank_center' in ZONE_COORDS:
+                x, y = ZONE_COORDS['tank_center']
+                return {'x': x, 'y': y, 'strategy': 'tank_center'}
+            return {'x': 1611, 'y': 600, 'strategy': 'center_push'}
         
         # Knight: Counter-push or defense
         elif 'knight' in name:
             if len(enemy_troops) > len(ally_troops):
-                # Defensive position
-                return {'x': 540, 'y': 900, 'strategy': 'defensive_tank'}
+                # Defensive position - use defend_center
+                if 'defend_center' in ZONE_COORDS:
+                    x, y = ZONE_COORDS['defend_center']
+                    return {'x': x, 'y': y, 'strategy': 'defensive_tank'}
+                return {'x': 1602, 'y': 660, 'strategy': 'defensive_tank'}
             else:
-                # Counter-push
-                return {'x': 400, 'y': 750, 'strategy': 'counter_push'}
+                # Counter-push left
+                if 'counter_left' in ZONE_COORDS:
+                    x, y = ZONE_COORDS['counter_left']
+                    return {'x': x, 'y': y, 'strategy': 'counter_push'}
+                return {'x': 1450, 'y': 650, 'strategy': 'counter_push'}
         
         # Mini PEKKA: High damage counter
         elif 'mini pekka' in name:
             if enemy_troops:
-                # Target closest enemy
+                # Target closest enemy - use actual enemy position
                 closest = min(enemy_troops, key=lambda t: t.get('y', 0))
-                return {'x': int(closest.get('x', 540)), 'y': 800, 'strategy': 'counter_attack'}
-            return {'x': 540, 'y': 750, 'strategy': 'push_support'}
+                return {'x': int(closest.get('x', 1611)), 'y': int(closest.get('y', 650)), 'strategy': 'counter_attack'}
+            # Use front_center for push support
+            if 'front_center' in ZONE_COORDS:
+                x, y = ZONE_COORDS['front_center']
+                return {'x': x, 'y': y, 'strategy': 'push_support'}
+            return {'x': 1611, 'y': 580, 'strategy': 'push_support'}
         
         # Musketeer: Back support
         elif 'musketeer' in name:
-            return {'x': 540, 'y': 950, 'strategy': 'back_support'}
+            if 'support_back' in ZONE_COORDS:
+                x, y = ZONE_COORDS['support_back']
+                return {'x': x, 'y': y, 'strategy': 'back_support'}
+            return {'x': 1611, 'y': 800, 'strategy': 'back_support'}
         
         # Archers: Split or support
         elif 'archers' in name:
             if len(ally_troops) > 0:
-                # Support existing push
-                ally_avg_x = sum(t.get('x', 540) for t in ally_troops) / len(ally_troops)
-                return {'x': int(ally_avg_x), 'y': 850, 'strategy': 'support_push'}
-            return {'x': 300, 'y': 850, 'strategy': 'split_push'}
+                # Support existing push - use ally position x with support y
+                ally_avg_x = sum(t.get('x', 1611) for t in ally_troops) / len(ally_troops)
+                y = ZONE_COORDS.get('back_center', (1611, 850))[1]
+                return {'x': int(ally_avg_x), 'y': y, 'strategy': 'support_push'}
+            # Use split_left region
+            if 'split_left' in ZONE_COORDS:
+                x, y = ZONE_COORDS['split_left']
+                return {'x': x, 'y': y, 'strategy': 'split_push'}
+            return {'x': 1400, 'y': 720, 'strategy': 'split_push'}
         
         # Minions: Air support
         elif 'minions' in name:
             if ally_troops:
-                # Support ground troops
-                ally_avg_x = sum(t.get('x', 540) for t in ally_troops) / len(ally_troops)
-                return {'x': int(ally_avg_x), 'y': 750, 'strategy': 'air_support'}
-            return {'x': 540, 'y': 750, 'strategy': 'air_push'}
+                # Support ground troops - use ally position x with air support y
+                ally_avg_x = sum(t.get('x', 1611) for t in ally_troops) / len(ally_troops)
+                y = ZONE_COORDS.get('air_support_center', (1611, 650))[1]
+                return {'x': int(ally_avg_x), 'y': y, 'strategy': 'air_support'}
+            # Use air_support_center region
+            if 'air_support_center' in ZONE_COORDS:
+                x, y = ZONE_COORDS['air_support_center']
+                return {'x': x, 'y': y, 'strategy': 'air_push'}
+            return {'x': 1611, 'y': 650, 'strategy': 'air_push'}
         
-        # Default position
-        return {'x': 540, 'y': 800, 'strategy': 'default'}
+        # Default position - use default_placement region
+        if 'default_placement' in ZONE_COORDS:
+            x, y = ZONE_COORDS['default_placement']
+            return {'x': x, 'y': y, 'strategy': 'default'}
+        return {'x': 1611, 'y': 680, 'strategy': 'default'}
     
     def cleanup(self):
         """Clean up resources"""

@@ -22,5 +22,61 @@
   "top_right": [
     1810,
     489
+  ],
+  "defend_left": [
+    1459,
+    546
+  ],
+  "defend_right": [
+    1752,
+    546
+  ],
+  "defend_center_top": [
+    1606,
+    491
+  ],
+  "defend_center": [
+    1602,
+    660
+  ],
+  "back_center": [
+    1611,
+    850
+  ],
+  "front_center": [
+    1611,
+    580
+  ],
+  "counter_left": [
+    1450,
+    650
+  ],
+  "counter_right": [
+    1750,
+    650
+  ],
+  "split_left": [
+    1400,
+    720
+  ],
+  "split_right": [
+    1800,
+    720
+  ],
+  "tank_center": [
+    1611,
+    600
+  ],
+  "support_back": [
+    1611,
+    800
+  ],
+  "air_support_center": [
+    1611,
+    650
+  ],
+  "default_placement": [
+    1611,
+    680
   ]
 }
