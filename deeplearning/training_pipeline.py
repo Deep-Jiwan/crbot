@@ -30,7 +30,8 @@ import logging
 
 # Add parent directory to path
 sys.path.append(os.path.dirname(__file__))
-from clash_royale_ai import ClashRoyaleAI, ClashRoyaleDataset, GameState, Action
+from clash_royale_ai import ClashRoyalePPO, GameState, Action
+from data_cleaner import DataCleaner
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -51,7 +52,7 @@ class TrainingConfig:
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     model_save_dir: str = "models"
     log_dir: str = "logs"
-    data_file: str = "../masterreceiver/game_data_log.jsonl"
+    data_file: str = "deeplearning/game_logs/game_log.jsonl"
 
 class DataPreprocessor:
     """Preprocesses game data for training"""
@@ -63,6 +64,12 @@ class DataPreprocessor:
     def load_and_preprocess_data(self, data_file: str) -> Tuple[np.ndarray, np.ndarray]:
         """Load and preprocess data from JSONL file"""
         logger.info(f"Loading data from {data_file}")
+        
+        # Clean data first
+        cleaner = DataCleaner()
+        cleaned_file = cleaner.clean_data(data_file)
+        logger.info(f"Using cleaned data: {cleaned_file}")
+        data_file = cleaned_file
         
         sequences = []
         rewards = []
@@ -213,8 +220,8 @@ class ModelTrainer:
         # Setup tensorboard
         self.writer = SummaryWriter(config.log_dir)
         
-        # Initialize model with enhanced input size
-        self.model = ClashRoyaleAI(input_size=15, hidden_size=256).to(self.device)
+        # Initialize PPO model with enhanced input size (3 actions only)
+        self.model = ClashRoyalePPO(input_size=15, hidden_size=256, num_actions=3).to(self.device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=config.learning_rate)
         self.criterion = nn.MSELoss()
         
@@ -379,7 +386,7 @@ class ModelTrainer:
 class ModelEvaluator:
     """Evaluates trained models"""
     
-    def __init__(self, model: ClashRoyaleAI, device: torch.device):
+    def __init__(self, model: ClashRoyalePPO, device: torch.device):
         self.model = model
         self.device = device
         self.model.eval()
@@ -520,8 +527,8 @@ def main():
             logger.error("Checkpoint path required for evaluation")
             return
         
-        # Load model with enhanced input size
-        model = ClashRoyaleAI(input_size=15, hidden_size=256).to(config.device)
+        # Load PPO model with enhanced input size (3 actions only)
+        model = ClashRoyalePPO(input_size=15, hidden_size=256, num_actions=3).to(config.device)
         checkpoint = torch.load(args.checkpoint, map_location=config.device)
         model.load_state_dict(checkpoint['model_state_dict'])
         

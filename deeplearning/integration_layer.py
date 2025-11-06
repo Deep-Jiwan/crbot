@@ -240,7 +240,7 @@ class AIController:
         self.module_manager = ModuleManager()
         self.data_aggregator = DataAggregator()
         self.health_checker = HealthChecker()
-        self.ai_agent = None
+        self.ai_agent: Optional['ClashRoyalePPOAgent'] = None
         self.running = False
         
     def initialize(self, start_modules: bool = True, required_only: bool = False):
@@ -264,9 +264,9 @@ class AIController:
         
         # Initialize AI agent
         try:
-            from clash_royale_ai import ClashRoyaleAgent
-            self.ai_agent = ClashRoyaleAgent()
-            print("AI agent initialized")
+            from clash_royale_ai import ClashRoyalePPOAgent
+            self.ai_agent = ClashRoyalePPOAgent()
+            print("PPO AI agent initialized")
         except Exception as e:
             print(f"Failed to initialize AI agent: {e}")
             return False
