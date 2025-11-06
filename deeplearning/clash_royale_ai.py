@@ -508,11 +508,22 @@ class ClashRoyalePPOAgent:
         """Execute action using GamePlayer"""
         try:
             if action.action_type == "place_card" and action.card_slot is not None:
-                # Accept zero coordinates as valid (don't rely on truthiness)
                 if action.target_x is not None and action.target_y is not None:
-                    # If the GamePlayer uses a different coordinate system, adjust here.
-                    self.game_player.place_card(action.card_slot, action.target_x, action.target_y)
-                    print(f"AI placed {action.card_name} at ({action.target_x}, {action.target_y})")
+                    # Special spell targeting
+                    if self._is_spell(action.card_name):
+                        spell_pos = self._get_spell_target(action.card_name)
+                        if spell_pos:
+                            self.game_player.place_card(action.card_slot, spell_pos['x'], spell_pos['y'])
+                            print(f"AI cast {action.card_name} at {spell_pos['target']} ({spell_pos['x']}, {spell_pos['y']})")
+                        else:
+                            print(f"AI held {action.card_name} - no good targets")
+                    else:
+                        # Tactical troop placement
+                        tactical_pos = self._get_tactical_position(action.card_name)
+                        final_x = tactical_pos.get('x', action.target_x)
+                        final_y = tactical_pos.get('y', action.target_y)
+                        self.game_player.place_card(action.card_slot, final_x, final_y)
+                        print(f"AI placed {action.card_name} at {tactical_pos.get('strategy', 'position')} ({final_x}, {final_y})")
             elif action.action_type == "defend":
                 # Tactical defensive action
                 defensive_card = self._select_defensive_card()
@@ -666,30 +677,39 @@ class ClashRoyalePPOAgent:
         if not self.current_state.cards_in_hand:
             return None
         
-        # Defensive card priorities (higher = more defensive)
-        defensive_cards = {
-            'knight': 8, 'valkyrie': 9, 'mega knight': 10,
-            'tesla': 7, 'cannon': 6, 'inferno tower': 9,
-            'ice spirit': 5, 'skeletons': 4, 'guards': 6,
-            'tombstone': 7, 'bomb tower': 6, 'archer': 5,
-            'musketeer': 6, 'wizard': 5, 'ice wizard': 7
+        # Deck-specific defensive priorities
+        deck_defensive_cards = {
+            'knight': 9,      # Best tank for defense
+            'musketeer': 7,   # Good range defense
+            'archers': 6,     # Cheap air defense
+            'minions': 5,     # Air defense/distraction
+            'mini pekka': 8   # High damage defense
         }
         
         best_card = None
         best_score = 0
         
+        enemy_count = len(self.current_state.enemy_troops)
+        air_enemies = sum(1 for t in self.current_state.enemy_troops 
+                         if 'dragon' in t.get('type', '').lower() or 'balloon' in t.get('type', '').lower() or 'minion' in t.get('type', '').lower() or 'barrel' in t.get('type', '').lower())
+        
         for card in self.current_state.cards_in_hand:
             card_name = card.get('name', '').lower()
             
-            # Check if card is defensive
-            for def_name, score in defensive_cards.items():
+            for def_name, base_score in deck_defensive_cards.items():
                 if def_name in card_name:
-                    # Boost score if many enemies present
-                    enemy_count = len(self.current_state.enemy_troops)
-                    adjusted_score = score + (enemy_count * 0.5)
+                    score = base_score
                     
-                    if adjusted_score > best_score:
-                        best_score = adjusted_score
+                    # Boost for air defense against air units
+                    if air_enemies > 0 and def_name in ['archers', 'musketeer', 'minions']:
+                        score += 3
+                    
+                    # Boost tank cards when many enemies
+                    if enemy_count > 2 and def_name in ['knight', 'mini pekka']:
+                        score += 2
+                    
+                    if score > best_score:
+                        best_score = score
                         best_card = card
                     break
         
@@ -697,7 +717,7 @@ class ClashRoyalePPOAgent:
         if not best_card and self.current_state.cards_in_hand:
             best_card = self.current_state.cards_in_hand[0]  # Fallback
         
-        return best_card
+        return best_card or (self.current_state.cards_in_hand[0] if self.current_state.cards_in_hand else None)
     
     def _get_defensive_position(self) -> Dict:
         """Get tactical defensive position based on enemy threats"""
@@ -719,6 +739,105 @@ class ClashRoyalePPOAgent:
             return {'x': 780, 'y': 900, 'zone': 'right_defense'}
         else:
             return {'x': 540, 'y': 950, 'zone': 'center_defense'}
+    
+    def _is_spell(self, card_name: str) -> bool:
+        """Check if card is a spell"""
+        if not card_name:
+            return False
+        name = card_name.lower()
+        return 'fireball' in name or 'arrows' in name
+    
+    def _get_spell_target(self, card_name: str) -> Optional[Dict]:
+        """Get optimal spell target position"""
+        if not card_name:
+            return None
+        
+        name = card_name.lower()
+        enemy_troops = self.current_state.enemy_troops
+        
+        if 'fireball' in name:
+            # Fireball: Target clusters of enemies or high-value targets
+            if len(enemy_troops) >= 2:
+                # Find cluster center
+                avg_x = sum(t.get('x', 540) for t in enemy_troops) / len(enemy_troops)
+                avg_y = sum(t.get('y', 400) for t in enemy_troops) / len(enemy_troops)
+                return {'x': int(avg_x), 'y': int(avg_y), 'target': 'enemy_cluster'}
+            elif len(enemy_troops) == 1:
+                # Single high-value target
+                target = enemy_troops[0]
+                return {'x': int(target.get('x', 540)), 'y': int(target.get('y', 400)), 'target': 'single_enemy'}
+        
+        elif 'arrows' in name:
+            # Arrows: Target swarms or air units
+            air_units = [t for t in enemy_troops if 'minion' in t.get('type', '').lower() or 'dragon' in t.get('type', '').lower()]
+            if air_units:
+                avg_x = sum(t.get('x', 540) for t in air_units) / len(air_units)
+                avg_y = sum(t.get('y', 400) for t in air_units) / len(air_units)
+                return {'x': int(avg_x), 'y': int(avg_y), 'target': 'air_swarm'}
+            elif len(enemy_troops) >= 3:
+                # Target swarm
+                avg_x = sum(t.get('x', 540) for t in enemy_troops) / len(enemy_troops)
+                avg_y = sum(t.get('y', 400) for t in enemy_troops) / len(enemy_troops)
+                return {'x': int(avg_x), 'y': int(avg_y), 'target': 'ground_swarm'}
+        
+        return None  # No good target found
+    
+    def _get_tactical_position(self, card_name: str) -> Dict:
+        """Get tactical position for troop cards"""
+        if not card_name:
+            return {'x': 540, 'y': 800, 'strategy': 'default'}
+        
+        name = card_name.lower()
+        enemy_troops = self.current_state.enemy_troops
+        ally_troops = self.current_state.ally_troops
+        
+        # Giant: Front tank position
+        if 'giant' in name:
+            if enemy_troops:
+                # Push toward enemies
+                enemy_avg_x = sum(t.get('x', 540) for t in enemy_troops) / len(enemy_troops)
+                return {'x': int(enemy_avg_x), 'y': 700, 'strategy': 'tank_push'}
+            return {'x': 540, 'y': 700, 'strategy': 'center_push'}
+        
+        # Knight: Counter-push or defense
+        elif 'knight' in name:
+            if len(enemy_troops) > len(ally_troops):
+                # Defensive position
+                return {'x': 540, 'y': 900, 'strategy': 'defensive_tank'}
+            else:
+                # Counter-push
+                return {'x': 400, 'y': 750, 'strategy': 'counter_push'}
+        
+        # Mini PEKKA: High damage counter
+        elif 'mini pekka' in name:
+            if enemy_troops:
+                # Target closest enemy
+                closest = min(enemy_troops, key=lambda t: t.get('y', 0))
+                return {'x': int(closest.get('x', 540)), 'y': 800, 'strategy': 'counter_attack'}
+            return {'x': 540, 'y': 750, 'strategy': 'push_support'}
+        
+        # Musketeer: Back support
+        elif 'musketeer' in name:
+            return {'x': 540, 'y': 950, 'strategy': 'back_support'}
+        
+        # Archers: Split or support
+        elif 'archers' in name:
+            if len(ally_troops) > 0:
+                # Support existing push
+                ally_avg_x = sum(t.get('x', 540) for t in ally_troops) / len(ally_troops)
+                return {'x': int(ally_avg_x), 'y': 850, 'strategy': 'support_push'}
+            return {'x': 300, 'y': 850, 'strategy': 'split_push'}
+        
+        # Minions: Air support
+        elif 'minions' in name:
+            if ally_troops:
+                # Support ground troops
+                ally_avg_x = sum(t.get('x', 540) for t in ally_troops) / len(ally_troops)
+                return {'x': int(ally_avg_x), 'y': 750, 'strategy': 'air_support'}
+            return {'x': 540, 'y': 750, 'strategy': 'air_push'}
+        
+        # Default position
+        return {'x': 540, 'y': 800, 'strategy': 'default'}
     
     def cleanup(self):
         """Clean up resources"""
