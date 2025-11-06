@@ -226,7 +226,6 @@ Open an issue for questions and support.
 * ZeroMQ community and examples
 * Roboflow documentation and tooling
 * https://github.com/krazyness/CRBot-public?tab=readme-ov-file
-* Best README Template inspiration
 
 
 <!-- MARKDOWN LINKS & IMAGES -->
