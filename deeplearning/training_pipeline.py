@@ -30,7 +30,7 @@ import logging
 
 # Add parent directory to path
 sys.path.append(os.path.dirname(__file__))
-from clash_royale_ai import ClashRoyalePPO, ClashRoyaleDataset, GameState, Action
+from clash_royale_ai import ClashRoyalePPO, GameState, Action
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
