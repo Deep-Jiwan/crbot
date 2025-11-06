@@ -514,7 +514,14 @@ class ClashRoyalePPOAgent:
                     self.game_player.place_card(action.card_slot, action.target_x, action.target_y)
                     print(f"AI placed {action.card_name} at ({action.target_x}, {action.target_y})")
             elif action.action_type == "defend":
-                print("AI defending...")
+                # Tactical defensive action
+                defensive_card = self._select_defensive_card()
+                if defensive_card:
+                    defensive_pos = self._get_defensive_position()
+                    self.game_player.place_card(defensive_card['slot'], defensive_pos['x'], defensive_pos['y'])
+                    print(f"AI defending with {defensive_card['name']} at {defensive_pos['zone']}")
+                else:
+                    print("AI defending but no suitable defensive cards available")
             elif action.action_type == "wait":
                 time.sleep(0.5)
                 print("AI waiting...")
@@ -653,6 +660,65 @@ class ClashRoyalePPOAgent:
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         print(f"PPO Model loaded from {path}")
+    
+    def _select_defensive_card(self) -> Optional[Dict]:
+        """Select best defensive card from hand"""
+        if not self.current_state.cards_in_hand:
+            return None
+        
+        # Defensive card priorities (higher = more defensive)
+        defensive_cards = {
+            'knight': 8, 'valkyrie': 9, 'mega knight': 10,
+            'tesla': 7, 'cannon': 6, 'inferno tower': 9,
+            'ice spirit': 5, 'skeletons': 4, 'guards': 6,
+            'tombstone': 7, 'bomb tower': 6, 'archer': 5,
+            'musketeer': 6, 'wizard': 5, 'ice wizard': 7
+        }
+        
+        best_card = None
+        best_score = 0
+        
+        for card in self.current_state.cards_in_hand:
+            card_name = card.get('name', '').lower()
+            
+            # Check if card is defensive
+            for def_name, score in defensive_cards.items():
+                if def_name in card_name:
+                    # Boost score if many enemies present
+                    enemy_count = len(self.current_state.enemy_troops)
+                    adjusted_score = score + (enemy_count * 0.5)
+                    
+                    if adjusted_score > best_score:
+                        best_score = adjusted_score
+                        best_card = card
+                    break
+        
+        # If no defensive cards, use cheapest card available
+        if not best_card and self.current_state.cards_in_hand:
+            best_card = self.current_state.cards_in_hand[0]  # Fallback
+        
+        return best_card
+    
+    def _get_defensive_position(self) -> Dict:
+        """Get tactical defensive position based on enemy threats"""
+        enemy_troops = self.current_state.enemy_troops
+        
+        if not enemy_troops:
+            # Default back center if no enemies
+            return {'x': 540, 'y': 1000, 'zone': 'back_center'}
+        
+        # Analyze enemy positions
+        enemy_left = sum(1 for t in enemy_troops if t.get('x', 540) < 360)
+        enemy_right = sum(1 for t in enemy_troops if t.get('x', 540) > 720)
+        enemy_center = len(enemy_troops) - enemy_left - enemy_right
+        
+        # Choose defensive position based on threat
+        if enemy_left > enemy_right and enemy_left > enemy_center:
+            return {'x': 300, 'y': 900, 'zone': 'left_defense'}
+        elif enemy_right > enemy_left and enemy_right > enemy_center:
+            return {'x': 780, 'y': 900, 'zone': 'right_defense'}
+        else:
+            return {'x': 540, 'y': 950, 'zone': 'center_defense'}
     
     def cleanup(self):
         """Clean up resources"""
