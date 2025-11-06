@@ -52,7 +52,7 @@ class TrainingConfig:
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     model_save_dir: str = "models"
     log_dir: str = "logs"
-    data_file: str = "../masterreceiver/game_data_log.jsonl"
+    data_file: str = "deeplearning/game_logs/game_log.jsonl"
 
 class DataPreprocessor:
     """Preprocesses game data for training"""

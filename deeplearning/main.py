@@ -164,7 +164,7 @@ class ClashRoyaleAIManager:
     def _run_data_collection_mode(self):
         """Run data collection mode"""
         logger.info("Starting data collection mode...")
-        logger.info("Data will be collected and saved to masterreceiver/game_data_log.jsonl")
+        logger.info("Data will be collected and saved to deeplearning/game_logs/game_log.jsonl")
         logger.info("Press Ctrl+C to stop data collection")
         
         try:
@@ -205,7 +205,7 @@ class ClashRoyaleAIManager:
         logger.info("Checking system status...")
         
         # Check if data file exists
-        data_file = Path("../masterreceiver/game_data_log.jsonl")
+        data_file = Path("deeplearning/game_logs/game_log.jsonl")
         if data_file.exists():
             file_size = data_file.stat().st_size
             logger.info(f"Data file exists: {data_file} ({file_size} bytes)")
@@ -270,13 +270,13 @@ Examples:
   python main.py --mode play --model-path models/best_model.pth
   
   # Training mode
-  python main.py --mode train --data-file ../masterreceiver/game_data_log.jsonl --epochs 100
+  python main.py --mode train --data-file deeplearning/game_logs/game_log.jsonl --epochs 100
   
   # Data collection mode (just run modules to collect data)
   python main.py --mode collect-data --required-only
   
   # Evaluate trained model
-  python main.py --mode evaluate --model-path models/best_model.pth --data-file ../masterreceiver/game_data_log.jsonl
+  python main.py --mode evaluate --model-path models/best_model.pth --data-file deeplearning/game_logs/game_log.jsonl
   
   # Check system status
   python main.py --mode status
@@ -297,7 +297,7 @@ Examples:
                        help="Don't start modules (assume they're already running)")
     
     # Training mode arguments
-    parser.add_argument("--data-file", type=str, default="../masterreceiver/game_data_log.jsonl",
+    parser.add_argument("--data-file", type=str, default="deeplearning/game_logs/game_log.jsonl",
                        help="Path to training data file")
     parser.add_argument("--epochs", type=int, default=100,
                        help="Number of training epochs")
