@@ -181,7 +181,7 @@ class ClashRoyaleAIManager:
         
         # Load PPO model
         import torch
-        model = ClashRoyalePPO(input_size=15, hidden_size=256)
+        model = ClashRoyalePPO(input_size=15, hidden_size=256, num_actions=3)
         checkpoint = torch.load(self.model_path, map_location='cpu')
         model.load_state_dict(checkpoint['model_state_dict'])
         

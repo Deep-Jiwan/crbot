@@ -213,8 +213,8 @@ class ModelTrainer:
         # Setup tensorboard
         self.writer = SummaryWriter(config.log_dir)
         
-        # Initialize PPO model with enhanced input size
-        self.model = ClashRoyalePPO(input_size=15, hidden_size=256).to(self.device)
+        # Initialize PPO model with enhanced input size (3 actions only)
+        self.model = ClashRoyalePPO(input_size=15, hidden_size=256, num_actions=3).to(self.device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=config.learning_rate)
         self.criterion = nn.MSELoss()
         
@@ -520,8 +520,8 @@ def main():
             logger.error("Checkpoint path required for evaluation")
             return
         
-        # Load PPO model with enhanced input size
-        model = ClashRoyalePPO(input_size=15, hidden_size=256).to(config.device)
+        # Load PPO model with enhanced input size (3 actions only)
+        model = ClashRoyalePPO(input_size=15, hidden_size=256, num_actions=3).to(config.device)
         checkpoint = torch.load(args.checkpoint, map_location=config.device)
         model.load_state_dict(checkpoint['model_state_dict'])
         

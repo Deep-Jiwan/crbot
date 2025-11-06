@@ -11,7 +11,7 @@ def test_model_forward():
     """Test basic model forward pass"""
     print("Testing PPO model forward pass...")
     
-    model = ClashRoyalePPO(input_size=15, hidden_size=256)
+    model = ClashRoyalePPO(input_size=15, hidden_size=256, num_actions=3)
     
     # Create dummy input
     batch_size = 2
@@ -22,7 +22,7 @@ def test_model_forward():
     outputs = model(input_tensor)
     
     # Check output shapes
-    assert outputs['action_logits'].shape == (batch_size, 5), f"Action logits shape: {outputs['action_logits'].shape}"
+    assert outputs['action_logits'].shape == (batch_size, 3), f"Action logits shape: {outputs['action_logits'].shape}"
     assert outputs['card_logits'].shape == (batch_size, 4), f"Card logits shape: {outputs['card_logits'].shape}"
     assert outputs['position_mean'].shape == (batch_size, 2), f"Position mean shape: {outputs['position_mean'].shape}"
     assert outputs['zone_logits'].shape == (batch_size, 6), f"Zone logits shape: {outputs['zone_logits'].shape}"
@@ -34,14 +34,14 @@ def test_action_sampling():
     """Test action sampling functionality"""
     print("Testing action sampling...")
     
-    model = ClashRoyalePPO(input_size=15, hidden_size=256)
+    model = ClashRoyalePPO(input_size=15, hidden_size=256, num_actions=3)
     input_tensor = torch.randn(1, 1, 15)
     
     # Sample actions
     result = model.get_action_and_value(input_tensor)
     
     # Check that actions are valid
-    assert 0 <= result['action'].item() < 5, f"Invalid action: {result['action'].item()}"
+    assert 0 <= result['action'].item() < 3, f"Invalid action: {result['action'].item()}"
     assert 0 <= result['card'].item() < 4, f"Invalid card: {result['card'].item()}"
     assert 0 <= result['zone'].item() < 6, f"Invalid zone: {result['zone'].item()}"
     assert result['position'].shape == (1, 2), f"Position shape: {result['position'].shape}"

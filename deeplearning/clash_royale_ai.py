@@ -194,7 +194,7 @@ class ClashRoyaleDataset(Dataset):
 class ClashRoyalePPO(nn.Module):
     """PPO-based AI model for Clash Royale decision making"""
     
-    def __init__(self, input_size: int = 15, hidden_size: int = 256, num_actions: int = 5):
+    def __init__(self, input_size: int = 15, hidden_size: int = 256, num_actions: int = 3):
         super(ClashRoyalePPO, self).__init__()
         
         self.input_size = input_size
@@ -355,8 +355,8 @@ class ClashRoyalePPOAgent:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         print(f"Using device: {self.device}")
         
-        # Initialize PPO model
-        self.model = ClashRoyalePPO(input_size=15, hidden_size=256).to(self.device)
+        # Initialize PPO model (3 actions only)
+        self.model = ClashRoyalePPO(input_size=15, hidden_size=256, num_actions=3).to(self.device)
         
         # Load pretrained model if available
         if model_path and os.path.exists(model_path):
@@ -381,13 +381,11 @@ class ClashRoyalePPOAgent:
         # Game player integration
         self.game_player = GamePlayer()
         
-        # Action mapping
+        # Action mapping (in-game only)
         self.action_map = {
             0: "wait",
             1: "place_card",
-            2: "start_match", 
-            3: "end_match",
-            4: "defend"
+            2: "defend"
         }
         
         # Zone mapping
@@ -640,12 +638,8 @@ class ClashRoyalePPOAgent:
                 if action.target_x and action.target_y:
                     self.game_player.place_card(action.card_slot, action.target_x, action.target_y)
                     print(f"AI placed card {action.card_slot} at ({action.target_x}, {action.target_y})")
-            elif action.action_type == "start_match":
-                self.game_player.start_match()
-                print("AI started match")
-            elif action.action_type == "end_match":
-                self.game_player.end_match()
-                print("AI ended match")
+            elif action.action_type == "defend":
+                print("AI defending...")
             elif action.action_type == "wait":
                 time.sleep(0.5)  # Wait briefly
                 print("AI waiting...")
