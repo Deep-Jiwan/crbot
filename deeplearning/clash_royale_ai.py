@@ -28,6 +28,93 @@ from gameplayer import GamePlayer
 
 load_dotenv()
 
+
+# Load zone coordinates from locations.txt if available. Falls back to None.
+def _load_zone_coords():
+    """Load zone coordinates.
+
+    Priority:
+      1. Load from coordinates.json if present.
+      2. Parse locations.txt and write coordinates.json for future runs.
+      3. Fall back to built-in defaults and write coordinates.json.
+    Returns a dict mapping zone_name (str) -> (x, y).
+    """
+    base = os.path.dirname(__file__)
+    json_path = os.path.join(base, 'coordinates.json')
+    loc_path = os.path.join(base, 'locations.txt')
+
+    # Try to load explicit JSON first
+    try:
+        if os.path.exists(json_path):
+            with open(json_path, 'r', encoding='utf-8') as jf:
+                raw = json.load(jf)
+            coords = {}
+            for k, v in raw.items():
+                try:
+                    if isinstance(v, (list, tuple)) and len(v) >= 2:
+                        coords[k] = (int(v[0]), int(v[1]))
+                except Exception:
+                    continue
+            if coords:
+                return coords
+    except Exception:
+        # ignore JSON errors and fall through to parsing locations.txt or defaults
+        pass
+
+    coords = {}
+    # If locations.txt exists, parse it and create coordinates.json
+    if os.path.exists(loc_path):
+        try:
+            with open(loc_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+                    try:
+                        parts = line.split(':', 1)
+                        idx = int(parts[0].strip())
+                        # Map index to zone name
+                        zone_names = ["bottom_left", "bottom_center", "bottom_right", "top_left", "top_center", "top_right"]
+                        zone_name = zone_names[idx] if 0 <= idx < len(zone_names) else None
+                        if not zone_name:
+                            continue
+                        lpar = line.rfind('(')
+                        rpar = line.rfind(')')
+                        if lpar != -1 and rpar != -1 and rpar > lpar:
+                            xy = line[lpar+1:rpar]
+                            x_str, y_str = xy.split(',', 1)
+                            x = int(x_str.strip())
+                            y = int(y_str.strip())
+                            coords[zone_name] = (x, y)
+                    except Exception:
+                        continue
+        except Exception:
+            coords = {}
+
+    # If still empty, use sensible defaults (from provided values)
+    if not coords:
+        coords = {
+            "bottom_left": (1390, 762),
+            "bottom_center": (1611, 658),
+            "bottom_right": (1816, 725),
+            "top_left": (1404, 472),
+            "top_center": (1606, 489),
+            "top_right": (1810, 489)
+        }
+
+    # Persist coordinates to coordinates.json for future runs
+    try:
+        to_save = {k: [v[0], v[1]] for k, v in coords.items()}
+        with open(json_path, 'w', encoding='utf-8') as jf:
+            json.dump(to_save, jf, indent=2)
+    except Exception:
+        pass
+
+    return coords
+
+# zone_coords is a mapping from zone index -> (x,y) in screen coordinates
+ZONE_COORDS = _load_zone_coords()
+
 @dataclass
 class GameState:
     """Current state of the game"""
@@ -227,15 +314,15 @@ class ClashRoyalePPOAgent:
             2: "defend"
         }
         
-        # Zone mapping
-        self.zone_map = {
-            0: "bottom_left",
-            1: "bottom_center", 
-            2: "bottom_right",
-            3: "top_left",
-            4: "top_center",
-            5: "top_right"
-        }
+        # Zone mapping - list of zone names for indexing from model output
+        self.zone_names = [
+            "bottom_left",
+            "bottom_center", 
+            "bottom_right",
+            "top_left",
+            "top_center",
+            "top_right"
+        ]
         
         # PPO hyperparameters
         self.clip_ratio = 0.2
@@ -365,10 +452,20 @@ class ClashRoyalePPOAgent:
             position_norm = result['position'].squeeze().cpu().numpy()
             
             action_type = self.action_map[action_idx]
-            target_zone = self.zone_map[zone_idx]
-            
-            target_x = int((position_norm[0] + 1) * 340 + 200)
-            target_y = int((position_norm[1] + 1) * 500 + 200)
+            target_zone = self.zone_names[zone_idx]
+            # Prefer using zone coordinates if available (user-supplied locations.txt)
+            target_x = None
+            target_y = None
+            if action_type == "place_card":
+                if ZONE_COORDS and target_zone in ZONE_COORDS:
+                    # Use the canonical coordinate for the inferred zone
+                    tx, ty = ZONE_COORDS[target_zone]
+                    target_x = int(tx)
+                    target_y = int(ty)
+                else:
+                    # Fallback to the sampled continuous position mapping
+                    target_x = int((position_norm[0] + 1) * 340 + 200)
+                    target_y = int((position_norm[1] + 1) * 500 + 200)
             
             card_name = None
             if action_type == "place_card" and card_slot < len(self.current_state.cards_in_hand):
@@ -411,7 +508,9 @@ class ClashRoyalePPOAgent:
         """Execute action using GamePlayer"""
         try:
             if action.action_type == "place_card" and action.card_slot is not None:
-                if action.target_x and action.target_y:
+                # Accept zero coordinates as valid (don't rely on truthiness)
+                if action.target_x is not None and action.target_y is not None:
+                    # If the GamePlayer uses a different coordinate system, adjust here.
                     self.game_player.place_card(action.card_slot, action.target_x, action.target_y)
                     print(f"AI placed {action.card_name} at ({action.target_x}, {action.target_y})")
             elif action.action_type == "defend":
