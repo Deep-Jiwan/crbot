@@ -191,21 +191,23 @@ class ClashRoyaleDataset(Dataset):
         
         return features, torch.tensor(reward, dtype=torch.float32)
 
-class ClashRoyaleAI(nn.Module):
-    """Main AI model for Clash Royale decision making"""
+class ClashRoyalePPO(nn.Module):
+    """PPO-based AI model for Clash Royale decision making"""
     
     def __init__(self, input_size: int = 15, hidden_size: int = 256, num_actions: int = 5):
-        super(ClashRoyaleAI, self).__init__()
+        super(ClashRoyalePPO, self).__init__()
         
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.num_actions = num_actions
         
-        # Enhanced input processing
-        self.input_encoder = nn.Sequential(
+        # Shared feature extractor
+        self.feature_extractor = nn.Sequential(
             nn.Linear(input_size, hidden_size),
             nn.ReLU(),
-            nn.Dropout(0.1)
+            nn.Dropout(0.1),
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU()
         )
         
         # LSTM for sequence processing
@@ -214,90 +216,157 @@ class ClashRoyaleAI(nn.Module):
         # Attention mechanism
         self.attention = nn.MultiheadAttention(hidden_size, num_heads=8, batch_first=True)
         
-        # Action prediction heads
-        self.action_head = nn.Linear(hidden_size, num_actions)
-        self.card_head = nn.Linear(hidden_size, 4)  # 4 card slots
-        self.position_head = nn.Linear(hidden_size, 2)  # x, y coordinates
-        self.zone_head = nn.Linear(hidden_size, 6)  # 6 zones: bottom_left, bottom_center, bottom_right, top_left, top_center, top_right
-        self.confidence_head = nn.Linear(hidden_size, 1)
+        # Policy heads (output action probabilities)
+        self.action_policy = nn.Linear(hidden_size, num_actions)
+        self.card_policy = nn.Linear(hidden_size, 4)
+        self.position_policy = nn.Linear(hidden_size, 2)  # Mean for continuous position
+        self.position_std = nn.Parameter(torch.ones(2) * 0.1)  # Learnable std
+        self.zone_policy = nn.Linear(hidden_size, 6)
         
-        # Value function for reinforcement learning
+        # Value function
         self.value_head = nn.Linear(hidden_size, 1)
         
-        # Dropout for regularization
         self.dropout = nn.Dropout(0.2)
         
     def forward(self, x):
-        # x shape: (batch_size, sequence_length, input_size)
-        batch_size = x.size(0)
-        
-        # Encode input features
-        encoded_input = self.input_encoder(x)
+        # Extract features
+        features = self.feature_extractor(x)
         
         # LSTM processing
-        lstm_out, (hidden, cell) = self.lstm(encoded_input)
+        lstm_out, _ = self.lstm(features)
         
         # Apply attention
         attn_out, _ = self.attention(lstm_out, lstm_out, lstm_out)
         
-        # Use the last output for decision making
-        last_output = attn_out[:, -1, :]  # (batch_size, hidden_size)
+        # Use last output
+        last_output = attn_out[:, -1, :]
         last_output = self.dropout(last_output)
         
-        # Predict actions
-        action_logits = self.action_head(last_output)
-        card_logits = self.card_head(last_output)
-        position = self.position_head(last_output)
-        zone_logits = self.zone_head(last_output)
-        confidence = torch.sigmoid(self.confidence_head(last_output))
+        # Policy outputs (probabilities)
+        action_logits = self.action_policy(last_output)
+        card_logits = self.card_policy(last_output)
+        position_mean = torch.tanh(self.position_policy(last_output))  # [-1, 1]
+        zone_logits = self.zone_policy(last_output)
+        
+        # Value function
         value = self.value_head(last_output)
         
         return {
             'action_logits': action_logits,
             'card_logits': card_logits,
-            'position': position,
+            'position_mean': position_mean,
+            'position_std': self.position_std.expand_as(position_mean),
             'zone_logits': zone_logits,
-            'confidence': confidence,
             'value': value
         }
+    
+    def get_action_and_value(self, x):
+        """Sample actions and return log probabilities and values"""
+        outputs = self.forward(x)
+        
+        # Sample actions
+        action_dist = torch.distributions.Categorical(logits=outputs['action_logits'])
+        card_dist = torch.distributions.Categorical(logits=outputs['card_logits'])
+        zone_dist = torch.distributions.Categorical(logits=outputs['zone_logits'])
+        position_dist = torch.distributions.Normal(outputs['position_mean'], outputs['position_std'])
+        
+        action = action_dist.sample()
+        card = card_dist.sample()
+        zone = zone_dist.sample()
+        position = position_dist.sample()
+        
+        # Calculate log probabilities
+        action_log_prob = action_dist.log_prob(action)
+        card_log_prob = card_dist.log_prob(card)
+        zone_log_prob = zone_dist.log_prob(zone)
+        position_log_prob = position_dist.log_prob(position).sum(dim=-1)
+        
+        total_log_prob = action_log_prob + card_log_prob + zone_log_prob + position_log_prob
+        
+        return {
+            'action': action,
+            'card': card,
+            'zone': zone,
+            'position': position,
+            'log_prob': total_log_prob,
+            'value': outputs['value'].squeeze(-1)
+        }
+    
+    def evaluate_actions(self, x, actions):
+        """Evaluate given actions and return log probabilities, values, and entropy"""
+        outputs = self.forward(x)
+        
+        action_dist = torch.distributions.Categorical(logits=outputs['action_logits'])
+        card_dist = torch.distributions.Categorical(logits=outputs['card_logits'])
+        zone_dist = torch.distributions.Categorical(logits=outputs['zone_logits'])
+        position_dist = torch.distributions.Normal(outputs['position_mean'], outputs['position_std'])
+        
+        action_log_prob = action_dist.log_prob(actions['action'])
+        card_log_prob = card_dist.log_prob(actions['card'])
+        zone_log_prob = zone_dist.log_prob(actions['zone'])
+        position_log_prob = position_dist.log_prob(actions['position']).sum(dim=-1)
+        
+        total_log_prob = action_log_prob + card_log_prob + zone_log_prob + position_log_prob
+        
+        entropy = (action_dist.entropy() + card_dist.entropy() + 
+                  zone_dist.entropy() + position_dist.entropy().sum(dim=-1))
+        
+        return total_log_prob, outputs['value'].squeeze(-1), entropy
 
-class ExperienceReplay:
-    """Experience replay buffer for reinforcement learning"""
+class PPOBuffer:
+    """Buffer for PPO training data"""
     
-    def __init__(self, capacity: int = 10000):
-        self.buffer = deque(maxlen=capacity)
+    def __init__(self):
+        self.states = []
+        self.actions = []
+        self.rewards = []
+        self.values = []
+        self.log_probs = []
+        self.dones = []
     
-    def push(self, state, action, reward, next_state, done):
-        self.buffer.append((state, action, reward, next_state, done))
+    def store(self, state, action, reward, value, log_prob, done):
+        self.states.append(state)
+        self.actions.append(action)
+        self.rewards.append(reward)
+        self.values.append(value)
+        self.log_probs.append(log_prob)
+        self.dones.append(done)
     
-    def sample(self, batch_size: int):
-        return random.sample(self.buffer, batch_size)
+    def get(self):
+        return (torch.stack(self.states), torch.stack(self.actions), 
+                torch.tensor(self.rewards), torch.stack(self.values),
+                torch.stack(self.log_probs), torch.tensor(self.dones))
+    
+    def clear(self):
+        self.states.clear()
+        self.actions.clear()
+        self.rewards.clear()
+        self.values.clear()
+        self.log_probs.clear()
+        self.dones.clear()
     
     def __len__(self):
-        return len(self.buffer)
+        return len(self.states)
 
-class ClashRoyaleAgent:
-    """Main agent that coordinates all components"""
+class ClashRoyalePPOAgent:
+    """PPO-based agent for Clash Royale"""
     
     def __init__(self, model_path: Optional[str] = None):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         print(f"Using device: {self.device}")
         
-        # Initialize model with enhanced input size
-        self.model = ClashRoyaleAI(input_size=15, hidden_size=256).to(self.device)
-        self.target_model = ClashRoyaleAI(input_size=15, hidden_size=256).to(self.device)
-        self.target_model.load_state_dict(self.model.state_dict())
+        # Initialize PPO model
+        self.model = ClashRoyalePPO(input_size=15, hidden_size=256).to(self.device)
         
         # Load pretrained model if available
         if model_path and os.path.exists(model_path):
             self.load_model(model_path)
         
-        # Initialize optimizer
-        self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
-        self.criterion = nn.MSELoss()
+        # PPO optimizer
+        self.optimizer = optim.Adam(self.model.parameters(), lr=3e-4)
         
-        # Experience replay
-        self.replay_buffer = ExperienceReplay()
+        # PPO buffer
+        self.buffer = PPOBuffer()
         
         # Game state tracking
         self.current_state = GameState()
@@ -321,7 +390,7 @@ class ClashRoyaleAgent:
             4: "defend"
         }
         
-        # Zone mapping for position prediction
+        # Zone mapping
         self.zone_map = {
             0: "bottom_left",
             1: "bottom_center", 
@@ -331,13 +400,15 @@ class ClashRoyaleAgent:
             5: "top_right"
         }
         
-        # Training parameters
-        self.epsilon = 1.0  # Exploration rate
-        self.epsilon_min = 0.01
-        self.epsilon_decay = 0.995
-        self.batch_size = 32
-        self.update_target_freq = 100
-        self.step_count = 0
+        # PPO hyperparameters
+        self.clip_ratio = 0.2
+        self.value_coef = 0.5
+        self.entropy_coef = 0.01
+        self.max_grad_norm = 0.5
+        self.update_epochs = 4
+        self.batch_size = 64
+        self.gamma = 0.99
+        self.gae_lambda = 0.95
         
     def setup_zmq(self):
         """Setup ZeroMQ connections to receive game data"""
@@ -475,92 +546,60 @@ class ClashRoyaleAgent:
         return features
     
     def select_action(self, state_features: np.ndarray, training: bool = True) -> Tuple[Action, Dict]:
-        """Select action using epsilon-greedy policy with enhanced reasoning"""
-        if training and random.random() < self.epsilon:
-            # Random action for exploration
-            action_type = random.choice(list(self.action_map.values()))
-            card_slot = random.randint(0, 3) if action_type == "place_card" else None
-            target_x = random.randint(200, 880) if action_type == "place_card" else None
-            target_y = random.randint(200, 1200) if action_type == "place_card" else None
-            target_zone = random.choice(list(self.zone_map.values())) if action_type == "place_card" else None
-            
-            reasoning = f"Random exploration: {action_type}"
-            if action_type == "place_card":
-                card_name = self.current_state.cards_in_hand[card_slot].get('name', 'Unknown') if card_slot < len(self.current_state.cards_in_hand) else 'Unknown'
-                reasoning += f" with {card_name} at {target_zone}"
-            
-            action = Action(
-                action_type=action_type,
-                card_slot=card_slot,
-                target_x=target_x,
-                target_y=target_y,
-                target_zone=target_zone,
-                confidence=0.5,
-                reasoning=reasoning,
-                card_name=card_name if action_type == "place_card" else None,
-                timestamp=time.time()
-            )
-            
-            return action, {}
-        
-        # Use model for action selection
+        """Select action using PPO policy"""
         with torch.no_grad():
             state_tensor = torch.FloatTensor(state_features).unsqueeze(0).unsqueeze(0).to(self.device)
-            outputs = self.model(state_tensor)
+            result = self.model.get_action_and_value(state_tensor)
             
-            action_logits = outputs['action_logits']
-            card_logits = outputs['card_logits']
-            position = outputs['position']
-            zone_logits = outputs['zone_logits']
-            confidence = outputs['confidence']
+            # Extract sampled actions
+            action_idx = result['action'].item()
+            card_slot = result['card'].item()
+            zone_idx = result['zone'].item()
+            position_norm = result['position'].squeeze().cpu().numpy()
             
-            # Select action
-            action_idx = torch.argmax(action_logits).item()
             action_type = self.action_map[action_idx]
+            target_zone = self.zone_map[zone_idx]
             
-            # Select card and position if placing a card
-            card_slot = None
-            target_x = None
-            target_y = None
-            target_zone = None
+            # Convert normalized position to game coordinates
+            target_x = int((position_norm[0] + 1) * 340 + 200)  # [-1,1] -> [200,880]
+            target_y = int((position_norm[1] + 1) * 500 + 200)   # [-1,1] -> [200,1200]
+            
             card_name = None
-            reasoning = ""
+            if action_type == "place_card" and card_slot < len(self.current_state.cards_in_hand):
+                card_name = self.current_state.cards_in_hand[card_slot].get('name', 'Unknown')
             
-            if action_type == "place_card":
-                card_slot = torch.argmax(card_logits).item()
-                zone_idx = torch.argmax(zone_logits).item()
-                target_zone = self.zone_map[zone_idx]
-                
-                # Get card name
-                if card_slot < len(self.current_state.cards_in_hand):
-                    card_name = self.current_state.cards_in_hand[card_slot].get('name', 'Unknown')
-                else:
-                    card_name = 'Unknown'
-                
-                # Convert normalized position to actual coordinates
-                target_x = int(position[0, 0].item() * 680 + 200)  # Scale to game area
-                target_y = int(position[0, 1].item() * 1000 + 200)
-                
-                # Generate reasoning
-                reasoning = self._generate_reasoning(action_type, card_name, target_zone, confidence[0, 0].item())
-            else:
-                reasoning = self._generate_reasoning(action_type, None, None, confidence[0, 0].item())
-            
-            conf_value = confidence[0, 0].item()
+            # Generate reasoning
+            confidence = torch.sigmoid(result['log_prob']).item()
+            reasoning = self._generate_reasoning(action_type, card_name, target_zone, confidence)
             
             action = Action(
                 action_type=action_type,
-                card_slot=card_slot,
-                target_x=target_x,
-                target_y=target_y,
-                target_zone=target_zone,
-                confidence=conf_value,
+                card_slot=card_slot if action_type == "place_card" else None,
+                target_x=target_x if action_type == "place_card" else None,
+                target_y=target_y if action_type == "place_card" else None,
+                target_zone=target_zone if action_type == "place_card" else None,
+                confidence=confidence,
                 reasoning=reasoning,
                 card_name=card_name,
                 timestamp=time.time()
             )
             
-            return action, outputs
+            # Store for training
+            if training:
+                actions_dict = {
+                    'action': result['action'],
+                    'card': result['card'],
+                    'zone': result['zone'],
+                    'position': result['position']
+                }
+                return action, {
+                    'state_tensor': state_tensor,
+                    'actions': actions_dict,
+                    'log_prob': result['log_prob'],
+                    'value': result['value']
+                }
+            
+            return action, {}
     
     def _generate_reasoning(self, action_type: str, card_name: Optional[str], target_zone: Optional[str], confidence: float) -> str:
         """Generate human-readable reasoning for AI decisions"""
@@ -613,47 +652,75 @@ class ClashRoyaleAgent:
         except Exception as e:
             print(f"Error executing action: {e}")
     
-    def train_step(self):
-        """Perform one training step using experience replay"""
-        if len(self.replay_buffer) < self.batch_size:
+    def compute_gae(self, rewards, values, dones):
+        """Compute Generalized Advantage Estimation"""
+        advantages = torch.zeros_like(rewards)
+        last_advantage = 0
+        
+        for t in reversed(range(len(rewards))):
+            if t == len(rewards) - 1:
+                next_value = 0
+            else:
+                next_value = values[t + 1]
+            
+            delta = rewards[t] + self.gamma * next_value * (1 - dones[t]) - values[t]
+            advantages[t] = delta + self.gamma * self.gae_lambda * (1 - dones[t]) * last_advantage
+            last_advantage = advantages[t]
+        
+        returns = advantages + values
+        return advantages, returns
+    
+    def ppo_update(self):
+        """Perform PPO update"""
+        if len(self.buffer) < self.batch_size:
             return
         
-        # Sample batch from replay buffer
-        batch = self.replay_buffer.sample(self.batch_size)
-        states, actions, rewards, next_states, dones = zip(*batch)
+        # Get data from buffer
+        states, actions_dict, rewards, values, old_log_probs, dones = self.buffer.get()
         
-        # Convert to tensors
-        states = torch.FloatTensor(np.array(states)).to(self.device)
-        next_states = torch.FloatTensor(np.array(next_states)).to(self.device)
-        rewards = torch.FloatTensor(rewards).to(self.device)
-        dones = torch.BoolTensor(dones).to(self.device)
+        # Compute advantages and returns
+        advantages, returns = self.compute_gae(rewards, values, dones)
         
-        # Current Q values
-        current_outputs = self.model(states)
-        current_values = current_outputs['value'].squeeze()
+        # Normalize advantages
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
         
-        # Next Q values from target network
-        with torch.no_grad():
-            next_outputs = self.target_model(next_states)
-            next_values = next_outputs['value'].squeeze()
-            target_values = rewards + (0.99 * next_values * ~dones)
+        # PPO update loop
+        for _ in range(self.update_epochs):
+            # Create mini-batches
+            indices = torch.randperm(len(states))
+            
+            for start in range(0, len(states), self.batch_size):
+                end = start + self.batch_size
+                batch_indices = indices[start:end]
+                
+                batch_states = states[batch_indices]
+                batch_actions = {k: v[batch_indices] for k, v in actions_dict.items()}
+                batch_advantages = advantages[batch_indices]
+                batch_returns = returns[batch_indices]
+                batch_old_log_probs = old_log_probs[batch_indices]
+                
+                # Evaluate current policy
+                new_log_probs, new_values, entropy = self.model.evaluate_actions(batch_states, batch_actions)
+                
+                # PPO loss
+                ratio = torch.exp(new_log_probs - batch_old_log_probs)
+                surr1 = ratio * batch_advantages
+                surr2 = torch.clamp(ratio, 1 - self.clip_ratio, 1 + self.clip_ratio) * batch_advantages
+                
+                policy_loss = -torch.min(surr1, surr2).mean()
+                value_loss = nn.MSELoss()(new_values, batch_returns)
+                entropy_loss = -entropy.mean()
+                
+                total_loss = policy_loss + self.value_coef * value_loss + self.entropy_coef * entropy_loss
+                
+                # Update
+                self.optimizer.zero_grad()
+                total_loss.backward()
+                nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+                self.optimizer.step()
         
-        # Compute loss
-        loss = self.criterion(current_values, target_values)
-        
-        # Optimize
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
-        
-        # Update target network
-        self.step_count += 1
-        if self.step_count % self.update_target_freq == 0:
-            self.target_model.load_state_dict(self.model.state_dict())
-        
-        # Decay epsilon
-        if self.epsilon > self.epsilon_min:
-            self.epsilon *= self.epsilon_decay
+        # Clear buffer
+        self.buffer.clear()
     
     def run(self, training: bool = True):
         """Main game loop"""
@@ -685,16 +752,23 @@ class ClashRoyaleAgent:
                     # Execute action
                     self.execute_action(action)
                     
-                    # Store experience for training
-                    if training:
+                    # Store experience for PPO training
+                    if training and model_outputs:
                         reward = self._calculate_reward()
-                        self.replay_buffer.push(
-                            state_features, action, reward, 
-                            self.get_state_features(), False
+                        done = self.current_state.win_condition in ["win", "lose"]
+                        
+                        self.buffer.store(
+                            model_outputs['state_tensor'].squeeze(0),
+                            model_outputs['actions'],
+                            reward,
+                            model_outputs['value'],
+                            model_outputs['log_prob'],
+                            done
                         )
                         
-                        # Train model
-                        self.train_step()
+                        # Update model when buffer is full or episode ends
+                        if len(self.buffer) >= self.batch_size or done:
+                            self.ppo_update()
                     
                     last_action_time = current_time
                 
@@ -728,19 +802,15 @@ class ClashRoyaleAgent:
         torch.save({
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
-            'epsilon': self.epsilon,
-            'step_count': self.step_count
         }, path)
-        print(f"Model saved to {path}")
+        print(f"PPO Model saved to {path}")
     
     def load_model(self, path: str):
         """Load a trained model"""
         checkpoint = torch.load(path, map_location=self.device)
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        self.epsilon = checkpoint.get('epsilon', 0.01)
-        self.step_count = checkpoint.get('step_count', 0)
-        print(f"Model loaded from {path}")
+        print(f"PPO Model loaded from {path}")
     
     def cleanup(self):
         """Clean up resources"""
@@ -748,35 +818,36 @@ class ClashRoyaleAgent:
         self.pub_socket.close()
         self.context.term()
 
-def train_model(data_file: str, epochs: int = 100):
-    """Train the model using historical data"""
-    print(f"Training model with data from {data_file}")
+def train_ppo_model(data_file: str, epochs: int = 100):
+    """Train PPO model using historical data (behavioral cloning pre-training)"""
+    print(f"Pre-training PPO model with data from {data_file}")
     
     # Create dataset
     dataset = ClashRoyaleDataset(data_file)
     dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
     
     # Initialize model
-    model = ClashRoyaleAI().to(torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
+    model = ClashRoyalePPO().to(torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
     optimizer = optim.Adam(model.parameters(), lr=0.001)
-    criterion = nn.MSELoss()
     
-    # Training loop
+    # Pre-training loop (behavioral cloning)
     for epoch in range(epochs):
         total_loss = 0
         for batch_idx, (features, rewards) in enumerate(dataloader):
             optimizer.zero_grad()
             
             outputs = model(features)
-            predicted_values = outputs['value'].squeeze()
+            # Simple value prediction loss for pre-training
+            value_loss = nn.MSELoss()(outputs['value'].squeeze(), rewards)
             
-            loss = criterion(predicted_values, rewards)
-            loss.backward()
+            value_loss.backward()
             optimizer.step()
             
-            total_loss += loss.item()
+            total_loss += value_loss.item()
         
-        print(f"Epoch {epoch+1}/{epochs}, Loss: {total_loss/len(dataloader):.4f}")
+        print(f"Pre-training Epoch {epoch+1}/{epochs}, Loss: {total_loss/len(dataloader):.4f}")
+    
+    return model
 
 if __name__ == "__main__":
     import argparse
@@ -792,7 +863,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     if args.mode == "train":
-        train_model(args.data_file, args.epochs)
+        train_ppo_model(args.data_file, args.epochs)
     else:
-        agent = ClashRoyaleAgent(args.model_path)
+        agent = ClashRoyalePPOAgent(args.model_path)
         agent.run(training=True)

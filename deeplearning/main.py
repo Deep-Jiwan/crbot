@@ -28,7 +28,7 @@ import logging
 sys.path.append(os.path.dirname(__file__))
 
 from integration_layer import AIController
-from clash_royale_ai import ClashRoyaleAgent
+from clash_royale_ai import ClashRoyalePPOAgent, ClashRoyalePPO
 from training_pipeline import TrainingConfig, ModelTrainer, ModelEvaluator, create_data_loaders
 
 # Setup logging
@@ -179,9 +179,9 @@ class ClashRoyaleAIManager:
         """Run evaluation mode"""
         logger.info("Starting evaluation mode...")
         
-        # Load enhanced model
+        # Load PPO model
         import torch
-        model = ClashRoyaleAI(input_size=15, hidden_size=256)
+        model = ClashRoyalePPO(input_size=15, hidden_size=256)
         checkpoint = torch.load(self.model_path, map_location='cpu')
         model.load_state_dict(checkpoint['model_state_dict'])
         
