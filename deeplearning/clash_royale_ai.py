@@ -230,7 +230,7 @@ class ClashRoyalePPO(nn.Module):
         self.card_policy = nn.Linear(hidden_size, 4)
         self.position_policy = nn.Linear(hidden_size, 2)
         self.position_std = nn.Parameter(torch.ones(2) * 0.1)
-        self.zone_policy = nn.Linear(hidden_size, 6)
+        self.zone_policy = nn.Linear(hidden_size, 16)
         
         # Value function
         self.value_head = nn.Linear(hidden_size, 1)
@@ -336,12 +336,11 @@ class ClashRoyalePPOAgent:
         
         # Zone mapping - list of zone names for indexing from model output
         self.zone_names = [
-            "bottom_left",
-            "bottom_center", 
-            "bottom_right",
-            "top_left",
-            "top_center",
-            "top_right"
+            "bottom_left", "bottom_center", "bottom_right",
+            "top_left", "top_center", "top_right",
+            "defend_left", "defend_right", "defend_center", "defend_center_top",
+            "back_center", "front_center", "counter_left", "counter_right",
+            "split_left", "tank_center"
         ]
         
         # PPO hyperparameters
@@ -538,19 +537,15 @@ class ClashRoyalePPOAgent:
                         else:
                             print(f"AI held {action.card_name} - no good targets")
                     else:
-                        # Tactical troop placement
-                        tactical_pos = self._get_tactical_position(action.card_name)
-                        final_x = tactical_pos.get('x', action.target_x)
-                        final_y = tactical_pos.get('y', action.target_y)
-                        self.game_player.place_card(action.card_slot, final_x, final_y)
-                        print(f"AI placed {action.card_name} at {tactical_pos.get('strategy', 'position')} ({final_x}, {final_y})")
+                        # Use model's zone selection
+                        self.game_player.place_card(action.card_slot, action.target_x, action.target_y)
+                        print(f"AI placed {action.card_name} at {action.target_zone} ({action.target_x}, {action.target_y})")
             elif action.action_type == "defend":
-                # Tactical defensive action
+                # Use model's zone for defense
                 defensive_card = self._select_defensive_card()
-                if defensive_card:
-                    defensive_pos = self._get_defensive_position()
-                    self.game_player.place_card(defensive_card['slot'], defensive_pos['x'], defensive_pos['y'])
-                    print(f"AI defending with {defensive_card['name']} at {defensive_pos['zone']}")
+                if defensive_card and action.target_x and action.target_y:
+                    self.game_player.place_card(defensive_card['slot'], action.target_x, action.target_y)
+                    print(f"AI defending with {defensive_card['name']} at {action.target_zone}")
                 else:
                     print("AI defending but no suitable defensive cards available")
             elif action.action_type == "wait":
