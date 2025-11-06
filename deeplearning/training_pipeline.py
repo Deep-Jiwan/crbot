@@ -31,6 +31,7 @@ import logging
 # Add parent directory to path
 sys.path.append(os.path.dirname(__file__))
 from clash_royale_ai import ClashRoyalePPO, GameState, Action
+from data_cleaner import DataCleaner
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -63,6 +64,12 @@ class DataPreprocessor:
     def load_and_preprocess_data(self, data_file: str) -> Tuple[np.ndarray, np.ndarray]:
         """Load and preprocess data from JSONL file"""
         logger.info(f"Loading data from {data_file}")
+        
+        # Clean data first
+        cleaner = DataCleaner()
+        cleaned_file = cleaner.clean_data(data_file)
+        logger.info(f"Using cleaned data: {cleaned_file}")
+        data_file = cleaned_file
         
         sequences = []
         rewards = []
